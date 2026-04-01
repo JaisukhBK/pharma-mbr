@@ -1,0 +1,406 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for middleware/middleware.js</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../prettify.css" />
+    <link rel="stylesheet" href="../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">middleware</a> middleware.js</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">91.07% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>51/56</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">76.92% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>30/39</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>11/11</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">95.83% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>46/48</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line high'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">39x</span>
+<span class="cline-any cline-yes">39x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">129x</span>
+<span class="cline-any cline-yes">129x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">63x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">55x</span>
+<span class="cline-any cline-yes">55x</span>
+<span class="cline-any cline-yes">54x</span>
+<span class="cline-any cline-yes">54x</span>
+<span class="cline-any cline-yes">53x</span>
+<span class="cline-any cline-yes">53x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">225x</span>
+<span class="cline-any cline-yes">44x</span>
+<span class="cline-any cline-yes">44x</span>
+<span class="cline-any cline-yes">39x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">13x</span>
+<span class="cline-any cline-yes">13x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">// server/middleware/middleware.js — JWT + RBAC + Part 11 lockout + Immutable audit log
+// Merged from: auth.js + auditTrail.js
+// 21 CFR Part 11 §11.10(d) (access controls) + §11.10(e) (audit trail)
+&nbsp;
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const { query } = require('../db/pool');
+&nbsp;
+// ════════════════════════════════════════════════════════════════════════
+// AUDIT TRAIL (Part 11 §11.10(e) — append-only)
+// ════════════════════════════════════════════════════════════════════════
+&nbsp;
+async function logAudit({ userId, userEmail, action, resourceType, resourceId, details, oldValue, newValue, changeReason, ipAddress, userAgent, aiGenerated = false }) {
+  try {
+    await query(
+      `INSERT INTO audit_trail (user_id,user_email,action,resource_type,resource_id,details,old_value,new_value,change_reason,ip_address,user_agent,ai_generated) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [userId, userEmail, action, resourceType, resourceId, details, oldValue ? <span class="branch-0 cbranch-no" title="branch not covered" >JSON.stringify(oldValue) </span>: null, newValue ? <span class="branch-0 cbranch-no" title="branch not covered" >JSON.stringify(newValue) </span>: null, changeReason, ipAddress, userAgent, aiGenerated]
+    );
+  } catch (err) {
+<span class="cstat-no" title="statement not covered" >    console.error('[AUDIT] Write failed:', err.message, { action, resourceType, resourceId });</span>
+  }
+}
+&nbsp;
+function auditMiddleware(req, res, next) {
+  req.audit = (params) =&gt; logAudit({ userId: req.session?.userId, userEmail: req.session?.email, ipAddress: req.ip, userAgent: req.headers['user-agent'], ...params });
+  next();
+}
+&nbsp;
+// ════════════════════════════════════════════════════════════════════════
+// AUTHENTICATION &amp; AUTHORIZATION (Part 11 §11.10(d))
+// ════════════════════════════════════════════════════════════════════════
+&nbsp;
+const SECRET = process.env.JWT_SECRET || <span class="branch-1 cbranch-no" title="branch not covered" >'dev-secret-change-me';</span>
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MIN = 30;
+&nbsp;
+const PERMS = {
+  admin:               ['mbr:read','mbr:write','mbr:delete','mbr:approve','mbr:sign','ebr:read','ebr:execute','ebr:verify','user:read','user:write','audit:read','co_designer:toggle','co_designer:review','config:read','config:write'],
+  designer:            ['mbr:read','mbr:write','mbr:sign','ebr:read','audit:read','co_designer:toggle','co_designer:review','config:read'],
+  qa_reviewer:         ['mbr:read','mbr:approve','mbr:sign','ebr:read','ebr:verify','audit:read','co_designer:review','config:read'],
+  production_operator: ['mbr:read','ebr:read','ebr:execute','audit:read','config:read'],
+  viewer:              ['mbr:read','ebr:read','audit:read','config:read'],
+};
+&nbsp;
+function generateToken(user) {
+  return jwt.sign({ userId: user.id, email: user.email, fullName: user.full_name, role: user.role, permissions: PERMS[user.role] || <span class="branch-1 cbranch-no" title="branch not covered" >[] </span>}, SECRET, { expiresIn: '8h' });
+}
+&nbsp;
+async function authenticate(req, res, next) {
+  const h = req.headers.authorization;
+  if (!h || !h.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    const d = jwt.verify(h.split(' ')[1], SECRET);
+    req.session = { userId: d.userId, email: d.email, fullName: d.fullName, role: d.role, permissions: d.permissions || <span class="branch-1 cbranch-no" title="branch not covered" >[] </span>};
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: err.name === 'TokenExpiredError' ? <span class="branch-0 cbranch-no" title="branch not covered" >'Token expired' </span>: 'Invalid token' });
+  }
+}
+&nbsp;
+function authorize(...perms) {
+  return (req, res, next) =&gt; {
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (!req.session) <span class="cstat-no" title="statement not covered" >return res.status(401).json({ error: 'Not authenticated' });</span>
+    if (!perms.every(p =&gt; req.session.permissions.includes(p))) return res.status(403).json({ error: 'Insufficient permissions', required: perms, your_role: req.session.role });
+    next();
+  };
+}
+&nbsp;
+async function login(email, password) {
+  const r = await query('SELECT * FROM users WHERE email = $1', [email]);
+  if (r.rows.length === 0) return { error: 'Invalid credentials', status: 401 };
+  const u = r.rows[0];
+&nbsp;
+  if (u.locked_until &amp;&amp; new Date(u.locked_until) &gt; new Date()) {
+    const mins = Math.ceil((new Date(u.locked_until) - new Date()) / 60000);
+    return { error: `Account locked. Try again in ${mins} minutes.`, status: 423 };
+  }
+  <span class="missing-if-branch" title="if path not taken" >I</span>if (!u.is_active) <span class="cstat-no" title="statement not covered" >return { error: 'Account deactivated', status: 403 };</span>
+&nbsp;
+  const valid = await bcrypt.compare(password, u.password_hash);
+  if (!valid) {
+    const attempts = (u.login_attempts || 0) + 1;
+    if (attempts &gt;= MAX_ATTEMPTS) {
+      await query('UPDATE users SET login_attempts=$1, locked_until=$2 WHERE id=$3', [attempts, new Date(Date.now() + LOCKOUT_MIN * 60000).toISOString(), u.id]);
+      return { error: `Account locked after ${MAX_ATTEMPTS} failed attempts`, status: 423 };
+    }
+    await query('UPDATE users SET login_attempts=$1 WHERE id=$2', [attempts, u.id]);
+    return { error: `Invalid credentials. ${MAX_ATTEMPTS - attempts} attempts left.`, status: 401 };
+  }
+&nbsp;
+  await query('UPDATE users SET login_attempts=0, locked_until=NULL, last_login_at=NOW() WHERE id=$1', [u.id]);
+  return { token: generateToken(u), user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role, department: u.department, permissions: PERMS[u.role] } };
+}
+&nbsp;
+async function verifyPasswordForSignature(userId, password) {
+  const r = await query('SELECT password_hash FROM users WHERE id=$1 AND is_active=true', [userId]);
+  <span class="missing-if-branch" title="if path not taken" >I</span>if (r.rows.length === 0) <span class="cstat-no" title="statement not covered" >return false;</span>
+  return bcrypt.compare(password, r.rows[0].password_hash);
+}
+&nbsp;
+async function registerUser(data) {
+  const hash = await bcrypt.hash(data.password, 10);
+  const r = await query('INSERT INTO users (email,password_hash,full_name,role,department,employee_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,email,full_name,role,department', [data.email, hash, data.full_name, data.role || 'designer', data.department, data.employee_id]);
+<span class="cstat-no" title="statement not covered" >  return r.rows[0];</span>
+}
+&nbsp;
+module.exports = { logAudit, auditMiddleware, authenticate, authorize, login, registerUser, verifyPasswordForSignature, generateToken, PERMS };
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-03-31T14:17:43.009Z
+            </div>
+        <script src="../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../sorter.js"></script>
+        <script src="../block-navigation.js"></script>
+    </body>
+</html>
+    

@@ -1,0 +1,142 @@
+# Pharma-MBR Kubernetes — ISA-95 Level 3 namespace isolation
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mbr-core
+  labels: { isa95.level: "3", compliance: gamp5-cat5 }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: co-designer
+  labels: { isa95.level: "3", ai-agent: "true" }
+---
+# Co-Designer can ONLY reach mbr-core (ISA-95 boundary)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: co-designer-isolation, namespace: co-designer }
+spec:
+  podSelector: {}
+  policyTypes: [Egress, Ingress]
+  ingress:
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: mbr-core } } }]
+  egress:
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: mbr-core } } }]
+    - to: [{ namespaceSelector: {} }]
+      ports: [{ protocol: UDP, port: 53 }]
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: pharma-mbr-secrets, namespace: mbr-core }
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://neondb_owner:CHANGE@ep-ENDPOINT.neon.tech/neondb?sslmode=require"
+  JWT_SECRET: "CHANGE-64-CHAR-RANDOM-STRING"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: pharma-mbr-config, namespace: mbr-core }
+data:
+  NODE_ENV: production
+  PORT: "3002"
+  CLIENT_URL: "https://pharma-mbr.example.com"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pharma-mbr-server
+  namespace: mbr-core
+  labels: { app: pharma-mbr-server, compliance: gamp5-cat5 }
+  annotations:
+    pharma-mbr/gamp5-category: "5"
+    pharma-mbr/validated: "true"
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: pharma-mbr-server } }
+  template:
+    metadata: { labels: { app: pharma-mbr-server } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1001, fsGroup: 1001 }
+      containers:
+        - name: server
+          image: pharma-mbr/server:1.0.0
+          ports: [{ containerPort: 3002 }]
+          envFrom:
+            - configMapRef: { name: pharma-mbr-config }
+            - secretRef: { name: pharma-mbr-secrets }
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: 1000m, memory: 512Mi }
+          livenessProbe: { httpGet: { path: /health, port: 3002 }, initialDelaySeconds: 15, periodSeconds: 30 }
+          readinessProbe: { httpGet: { path: /health, port: 3002 }, initialDelaySeconds: 5, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: pharma-mbr-server, namespace: mbr-core }
+spec:
+  selector: { app: pharma-mbr-server }
+  ports: [{ port: 3002, targetPort: 3002 }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: pharma-mbr-hpa, namespace: mbr-core }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: pharma-mbr-server }
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+---
+# Co-Designer agent deployment (isolated namespace)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: co-designer-service
+  namespace: co-designer
+  labels: { app: co-designer, compliance: gamp5-cat5 }
+  annotations: { pharma-mbr/human-in-loop: required }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: co-designer } }
+  template:
+    metadata: { labels: { app: co-designer } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1001 }
+      containers:
+        - name: agent
+          image: pharma-mbr/co-designer:1.0.0
+          ports: [{ containerPort: 3003 }]
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits: { cpu: 2000m, memory: 2Gi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 200Mi } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: co-designer-service, namespace: co-designer }
+spec:
+  selector: { app: co-designer }
+  ports: [{ port: 3003, targetPort: 3003 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pharma-mbr-ingress
+  namespace: mbr-core
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.pharma-mbr.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: pharma-mbr-server, port: { number: 3002 } } }
