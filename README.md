@@ -1,114 +1,199 @@
-# Pharma-MBR
+# PharmaMES.AI
 
-ISA-88 / ISA-95 compliant Master Batch Record Designer with AI Co-Designer Agent, backed by Neon PostgreSQL and deployable on Kubernetes.
+**Pharmaceutical Manufacturing Execution System** — AI-powered, 21 CFR Part 11 compliant
 
-## Quick Start
+[![Live API](https://img.shields.io/badge/API-Live-green)](https://pharma-mbr-api.vercel.app/api/health)
+[![Live Client](https://img.shields.io/badge/Client-Live-blue)](https://pharma-mbr-client.vercel.app)
 
-### 1. Server setup
+## Overview
 
-```bash
-cd server
-cp .env.example .env
-# Edit .env — paste your Neon PostgreSQL connection string from console.neon.tech
-npm install
-npm run dev
-```
+PharmaMES.AI is a full-stack Manufacturing Execution System (MES) for pharmaceutical manufacturing. It manages the complete lifecycle of Master Batch Records (MBRs), Electronic Batch Records (EBRs), deviations, CAPAs, equipment, training, and change control — all compliant with FDA 21 CFR Part 11 and GAMP5 Category 5 requirements.
 
-The server auto-creates all 16 tables and seeds Metformin HCl 500mg demo data on first run.
+The system features an AI Co-Designer that can parse legacy MBR PDFs and decompose them into ISA-88 compliant recipe structures using LLM technology.
 
-### 2. Client setup
+## Tech Stack
 
-```bash
-cd client
-npm install
-npm run dev
-```
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18, Vite, Lucide Icons |
+| Backend | Node.js, Express.js |
+| Database | PostgreSQL (Neon serverless) |
+| AI/LLM | Groq API (Llama 3.3 70B) |
+| Auth | JWT, bcrypt, 21 CFR Part 11 e-signatures |
+| Security | Helmet, express-rate-limit, express-validator, CORS |
+| Deployment | Vercel (serverless API + static frontend) |
+| VCS | Git, GitHub |
 
-Open http://localhost:5174 — login with any demo account.
+## Compliance Standards
 
-### Demo Accounts (password: `pharma123`)
+- **21 CFR Part 11** — Electronic records, electronic signatures, audit trail
+- **GAMP5 Category 5** — Custom application with full validation lifecycle
+- **ISA-88 (S88)** — Recipe hierarchy: Procedure → Unit Procedure → Operation
+- **ISA-95** — Integration platform for enterprise connectivity
+- **ICH Q10** — Pharmaceutical Quality System
+- **ICH Q9** — Quality Risk Management (FMEA)
 
-| Email | Role |
-|---|---|
-| jaisukh.patel@pharmambr.com | Admin |
-| priya.singh@pharmambr.com | QA Reviewer |
-| wei.chen@pharmambr.com | Designer |
-| raj.kumar@pharmambr.com | Production Operator |
+## Features
 
----
+### Manufacturing
+- **MBR Designer** — ISA-88 recipe hierarchy editor with phases, steps, parameters, BOM, IPC checks
+- **AI Co-Designer** — Upload legacy MBR PDF → AI decomposes into structured proposals → human review → apply
+- **Batch Scaling** — Change batch size → all BOM quantities auto-recalculate
+- **PDF Export** — Generate print-ready MBR documents for shop floor use
+- **EBR Execution** — Electronic batch record execution engine
 
-## Architecture
+### Quality
+- **Deviations & CAPA** — Full deviation lifecycle with CAPA linkage
+- **Change Control** — Change request lifecycle with approval chains
+- **Training** — Curriculum management, training records, compliance gating
 
-```
-Client (React 18 + Vite)                Server (Express + Neon PostgreSQL)
-┌────────────────────────┐              ┌──────────────────────────────┐
-│ App.jsx                │              │ /api/auth    → authRoutes    │
-│  ├─ Login Screen       │   REST API   │ /api/mbr     → mbrRoutes     │
-│  ├─ MBR List Screen    │ ──────────── │ /api/co-designer → cdRoutes  │
-│  └─ MBR Designer       │              │ /api/audit   → global audit  │
-│     ├─ CoDesignerPanel │              │ /health      → status        │
-│     └─ (uploaded JSX)  │              └────────┬─────────────────────┘
-└────────────────────────┘                       │
-                                         Neon PostgreSQL (16 tables)
-```
+### Compliance
+- **Electronic Signatures** — 21 CFR Part 11 §11.200 with password re-verification
+- **Approval Workflow** — Author → Reviewer → Approver → QA Approver chain
+- **Version History** — Every change tracked with snapshots and change reasons
+- **Audit Trail** — Immutable, SHA-256 integrity-checked, ALCOA+ compliant
+- **Role-Based Access** — Admin, Designer, QA Reviewer, Production Operator, Viewer
 
-## Compliance Coverage
-
-| Standard | Implementation |
-|---|---|
-| 21 CFR Part 11 §11.10(d) | JWT auth, 5-role RBAC, account lockout after 5 failed attempts |
-| 21 CFR Part 11 §11.10(e) | Append-only audit_trail table, every mutation logged |
-| 21 CFR Part 11 §11.50 | E-signatures with role + meaning + SHA-256 content hash |
-| 21 CFR Part 11 §11.70 | Signature cryptographically bound to MBR state |
-| 21 CFR Part 11 §11.200 | Password re-entry for e-signatures and Co-Design mode |
-| GAMP5 Category 5 | Immutable container images, version-pinned deploys |
-| ISA-88 (S88) | Procedure → Unit Procedure → Operation → Parameters |
-| ISA-95 | Level 3 MES positioning, K8s namespace isolation |
-
-## Database Schema (16 tables)
-
-users, mbrs, mbr_versions, mbr_phases, mbr_steps, mbr_step_parameters, mbr_step_materials, mbr_step_equipment, mbr_ipc_checks, mbr_bom_items, mbr_signatures, audit_trail, co_designer_sessions, co_designer_proposals, ebrs, ebr_step_executions
-
-## Co-Designer Modes
-
-| Mode | Behavior | Auth Required |
-|---|---|---|
-| Off | Pure manual design | None |
-| Assist | AI suggests, flags issues | Toggle permission |
-| Co-Design | AI proposes full MBR from PDF | Password (Part 11 §11.200) |
-
-Every AI proposal goes through: `pending → review → accept/modify/reject`, flagged `ai_generated: true` in audit trail.
-
-## Kubernetes
-
-The `k8s/pharma-mbr.yaml` manifest creates:
-- `mbr-core` namespace — server pods with HPA (2-8 replicas)
-- `co-designer` namespace — isolated AI agent (NetworkPolicy restricts to mbr-core API only)
-- Ingress with TLS and rate limiting
-
-Deploy: `kubectl apply -f k8s/pharma-mbr.yaml`
+### Equipment & Integration
+- **Equipment Registry** — Master list with qualification status
+- **Equipment QM** — Qualification and maintenance tracking
+- **Integration Platform** — ISA-95 connector management
 
 ## Project Structure
 
 ```
 pharma-mbr/
-├── server/
-│   ├── db/          pool.js, schema.sql, seed.sql
-│   ├── middleware/   auth.js, auditTrail.js
-│   ├── routes/       authRoutes.js, mbrRoutes.js, coDesignerRoutes.js
-│   ├── index.js
-│   ├── Dockerfile
-│   └── package.json
-├── client/
-│   └── src/
-│       ├── services/    authService.js, mbrService.js, coDesignerService.js
-│       ├── components/
-│       │   └── MBRDesigner/
-│       │       ├── MBRDesigner.jsx      (uploaded 1237-line component)
-│       │       ├── CoDesignerPanel.jsx  (Co-Designer 3-mode switch)
-│       │       └── mbrDemoData.js       (Metformin seed for standalone use)
-│       ├── App.jsx     (Login + MBR List + Designer wrapper)
-│       └── main.jsx
-├── k8s/             pharma-mbr.yaml
-└── docker-compose.yml
+├── client/                    # React frontend (Vite)
+│   ├── src/
+│   │   ├── App.jsx           # Main app with routing, sidebar, all views
+│   │   ├── components/
+│   │   │   └── MBRDesigner/  # MBR Designer components
+│   │   │       ├── MBRDesigner.jsx         # Main designer (ISA-88)
+│   │   │       ├── CoDesignerPanel.jsx     # AI Co-Designer
+│   │   │       ├── ApprovalWorkflowBar.jsx # Signature chain UI
+│   │   │       ├── VersionHistoryPanel.jsx # Version timeline
+│   │   │       └── OperationFormulaPanel.jsx
+│   │   └── services/
+│   │       └── apiService.js  # API client
+│   └── vercel.json
+├── server/                    # Express API (serverless)
+│   ├── api/index.js          # Vercel entry point
+│   ├── app.js                # Express app config
+│   ├── index.js              # Local dev server
+│   ├── db/
+│   │   ├── pool.js           # DB connection + 7 migrations
+│   │   ├── seed-all.js       # Comprehensive seeder
+│   │   └── block-carlos.js   # User suspension demo
+│   ├── middleware/
+│   │   └── middleware.js      # Auth, audit, JWT, RBAC
+│   ├── routes/               # API routes
+│   │   ├── authRoutes.js
+│   │   ├── mbrRoutes.js
+│   │   ├── coDesignerRoutes.js
+│   │   ├── ebrRoutes.js
+│   │   ├── equipmentRoutes.js
+│   │   ├── devcapaRoutes.js
+│   │   ├── trainingRoutes.js
+│   │   └── ...
+│   ├── services/             # Business logic
+│   │   ├── coDesignerAgent.js # AI pipeline
+│   │   ├── stateMachine.js    # MBR lifecycle
+│   │   └── ...
+│   └── vercel.json
+└── README.md
 ```
+
+## Getting Started
+
+### Prerequisites
+- Node.js 18+
+- PostgreSQL (or Neon account)
+- Groq API key (for AI features)
+
+### Local Development
+
+```bash
+# Clone
+git clone https://github.com/JaisukhBK/pharma-mbr.git
+cd pharma-mbr
+
+# Server setup
+cd server
+cp .env.example .env
+# Edit .env with your DATABASE_URL, JWT_SECRET, GROQ_API_KEY
+npm install
+npm install pdf-parse@1.1.1
+node db/seed-all.js    # Seed demo data
+node index.js          # Starts on http://localhost:3004
+
+# Client setup (new terminal)
+cd client
+npm install
+npm run dev            # Starts on http://localhost:5176
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|------------|
+| `DATABASE_URL` | Neon PostgreSQL connection string |
+| `JWT_SECRET` | 64+ char random string for JWT signing |
+| `GROQ_API_KEY` | Groq API key for AI Co-Designer |
+| `NODE_ENV` | `development` or `production` |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins |
+| `VITE_API_URL` | API base URL (client-side) |
+
+### Demo Accounts
+
+All accounts use password: `pharma123`
+
+| Role | Email |
+|------|-------|
+| System Administrator | jaisukh.patel@pharmambr.com |
+| QA Reviewer | priya.singh@pharmambr.com |
+| Production Operator | raj.kumar@pharmambr.com |
+| Supervisor (Suspended) | carlos.martinez@pharmambr.com |
+| Systems Engineer | wei.chen@pharmambr.com |
+
+## Deployment
+
+### Vercel (Production)
+
+**API:** https://pharma-mbr-api.vercel.app
+**Client:** https://pharma-mbr-client.vercel.app
+
+```bash
+# Deploy API
+cd pharma-mbr
+vercel --prod
+
+# Deploy Client
+cd client
+vercel --prod
+```
+
+## API Endpoints
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/health` | Health check |
+| POST | `/api/auth/login` | Login |
+| GET | `/api/mbr` | List MBRs |
+| GET | `/api/mbr/:id` | Get MBR with full hierarchy |
+| POST | `/api/mbr` | Create MBR |
+| POST | `/api/mbr/:id/sign` | E-signature (Part 11) |
+| POST | `/api/mbr/:id/new-version` | Create new version |
+| GET | `/api/mbr/:id/versions` | Version history |
+| POST | `/api/co-designer/:id/upload` | Upload MBR PDF for AI |
+| GET | `/api/equipment` | List equipment |
+| GET | `/api/devcapa/deviations` | List deviations |
+| GET | `/api/training/matrix` | Training matrix |
+
+## License
+
+Proprietary — Jaisukh Patel / Northeastern University MSBA
+
+## Author
+
+**Jaisukh (Vihaan) Patel**
+Master of Science in Business Analytics, Northeastern University

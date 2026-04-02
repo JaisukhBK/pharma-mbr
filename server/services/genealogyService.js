@@ -20,7 +20,7 @@ async function getBatch(id) {
   const batch = await query(
     'SELECT e.*, m.product_code FROM ebrs e LEFT JOIN mbrs m ON e.mbr_id=m.id WHERE e.id=$1', [id]);
   if (batch.rows.length === 0) return null;
-  const materials = await query('SELECT * FROM batch_genealogy WHERE ebr_id=$1 ORDER BY created_at', [id]);
+  const materials = await query('SELECT * FROM batch_genealogy WHERE ebr_id=$1 ORDER BY dispensed_at NULLS LAST', [id]);
   const deviations = await query('SELECT * FROM ebr_deviations WHERE ebr_id=$1', [id]);
   return { ...batch.rows[0], materials: materials.rows, deviations: deviations.rows };
 }
@@ -53,8 +53,6 @@ async function releaseLot(lotId) {
 
 async function linkMaterialToBatch(data) {
   const { ebr_id, material_lot_id, lot_number, material_name, qty_dispensed, unit, step_name } = data;
-  const batch = await query('SELECT batch_number FROM ebrs WHERE id=$1', [ebr_id]);
-  const batchNumber = batch.rows[0]?.batch_number || '';
   const r = await query(
     `INSERT INTO batch_genealogy (ebr_id, material_lot_id, lot_number, material_name, qty_dispensed, unit, step_name)
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
@@ -67,7 +65,7 @@ async function linkMaterialToBatch(data) {
 async function traceForward(lotNumber) {
   const batches = await query(
     `SELECT bg.*, e.product_name, e.status as batch_status
-     FROM batch_genealogy bg LEFT JOIN ebrs e ON bg.ebr_id=e.id WHERE bg.lot_number=$1 ORDER BY bg.created_at`, [lotNumber]);
+     FROM batch_genealogy bg LEFT JOIN ebrs e ON bg.ebr_id=e.id WHERE bg.lot_number=$1 ORDER BY bg.dispensed_at NULLS LAST`, [lotNumber]);
   return { lot_number: lotNumber, used_in_batches: batches.rows, count: batches.rows.length };
 }
 
@@ -76,7 +74,7 @@ async function traceBackward(batchNumber) {
   if (ebr.rows.length === 0) return { batch_number: batchNumber, input_materials: [], count: 0 };
   const materials = await query(
     `SELECT bg.*, ml.supplier, ml.expiry_date, ml.status as lot_status
-     FROM batch_genealogy bg LEFT JOIN material_lots ml ON bg.material_lot_id=ml.id WHERE bg.ebr_id=$1 ORDER BY bg.created_at`, [ebr.rows[0].id]);
+     FROM batch_genealogy bg LEFT JOIN material_lots ml ON bg.material_lot_id=ml.id WHERE bg.ebr_id=$1 ORDER BY bg.dispensed_at NULLS LAST`, [ebr.rows[0].id]);
   return { batch_number: batchNumber, input_materials: materials.rows, count: materials.rows.length };
 }
 
