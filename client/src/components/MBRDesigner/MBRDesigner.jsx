@@ -5,6 +5,8 @@
 
 import { mbrService } from '../../services/apiService';
 import { DEMO_MBR, DEMO_BOM, DEMO_PHASES, DEMO_SIGNATURES } from './mbrDemoData';
+import ApprovalWorkflowBar from './ApprovalWorkflowBar';
+import VersionHistoryPanel from './VersionHistoryPanel';
 import { useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import {
   Shield, FileText, Plus, Trash2, ChevronDown, ChevronRight,
@@ -999,7 +1001,7 @@ function UnitProcedureCard({ phase, onUpdate, onDelete, t, disabled }) {
 // E-SIGNATURE MODAL (Part 11)
 // ════════════════════════════════════════════════════════════════════════════
 
-function ESignModal({ open, onClose, onSign, mbrCode, signatures, t }) {
+function ESignModal({ open, onClose, onSign, mbrId, mbrCode, signatures, t }) {
   const [role, setRole] = useState('');
   const [pw, setPw] = useState('');
   const [signing, setSigning] = useState(false);
@@ -1009,11 +1011,20 @@ function ESignModal({ open, onClose, onSign, mbrCode, signatures, t }) {
 
   const handleSign = async () => {
     if (!role || !pw) { setError('Both role and password are required.'); return; }
+    if (!mbrId) { setError('No MBR loaded.'); return; }
     setSigning(true); setError('');
-    await new Promise(r => setTimeout(r, 1000));
-    const meta = SIGNATURE_ROLES.find(r => r.role === role);
-    onSign({ id:createId(), signature_role:role, signature_meaning:meta.meaning, signer_email:'current.user@pharma.com', signed_at:new Date().toISOString(), password_verified:true, content_hash:'sha256_'+Math.random().toString(36).slice(2,18) });
-    setPw(''); setRole(''); setSigning(false); onClose();
+    try {
+      const meta = SIGNATURE_ROLES.find(r => r.role === role);
+      const result = await mbrService.signMBR(mbrId, {
+        signature_role: role,
+        signature_meaning: meta.meaning,
+        password: pw,
+      });
+      onSign(result);
+      setPw(''); setRole(''); onClose();
+    } catch (e) {
+      setError(e.message || 'Signature failed');
+    } finally { setSigning(false); }
   };
 
   const applied = signatures.map(s => s.signature_role);
@@ -1096,6 +1107,17 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
   const [saveStatus, setSaveStatus] = useState('idle');
   const [currentPhase, setCurrentPhase] = useState(null);
   const [activeView, setActiveView] = useState('recipe');
+  const [nextSig, setNextSig] = useState(null);
+
+  // Load signatures from API
+  useEffect(() => {
+    if (mbrId) {
+      mbrService.getSignatures(mbrId).then(data => {
+        setSignatures(data.data || []);
+        setNextSig(data.next_signature || null);
+      }).catch(() => {});
+    }
+  }, [mbrId]);
 
   // Sync when initialData changes
   useEffect(() => {
@@ -1118,12 +1140,23 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
   const updatePhase = (u) => setPhases(p => p.map(x => x.id===u.id?u:x));
   const deletePhase = (id) => setPhases(p => p.filter(x => x.id!==id));
 
-  const handleSign = (sig) => {
-    setSignatures(p => [...p, sig]);
-    const roles = [...signatures, sig].map(s => s.signature_role);
-    if (roles.includes('QA_Approver') && roles.includes('Approver')) setMbr(p => ({...p, status:'Effective'}));
-    else if (roles.includes('Approver')) setMbr(p => ({...p, status:'Approved'}));
-    else if (roles.includes('Reviewer')) setMbr(p => ({...p, status:'In Review'}));
+  const handleSign = async (result) => {
+    // result comes from the API: { signature, mbr_status, content_hash, next_signature }
+    if (result.signature) {
+      setSignatures(p => [...p, result.signature]);
+    }
+    if (result.mbr_status) {
+      setMbr(p => ({ ...p, status: result.mbr_status }));
+    }
+    setNextSig(result.next_signature || null);
+    // Reload signatures from API
+    if (mbrId) {
+      try {
+        const sigData = await mbrService.getSignatures(mbrId);
+        setSignatures(sigData.data || []);
+        setNextSig(sigData.next_signature || null);
+      } catch {}
+    }
   };
 
   const handleSave = async () => {
@@ -1190,21 +1223,28 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
       </div>
     </MBRCard>
 
-    {/* Signature Summary */}
-    {signatures.length > 0 && <MBRCard t={t} style={{ marginBottom:16, padding:'12px 18px' }}>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}><Shield size={13} color={t.accent}/><span style={{ fontSize:11, fontWeight:600, color:t.textDim, textTransform:'uppercase' }}>Electronic Signatures</span></div>
-        <div style={{ display:'flex', gap:14 }}>
-          {SIGNATURE_ROLES.map(r => {
-            const sig = signatures.find(s => s.signature_role===r.role);
-            return <div key={r.role} style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, fontFamily:"'DM Mono',monospace", color:sig?t.success:t.textMuted }}>
-              {sig ? <CheckCircle size={11}/> : <div style={{ width:10, height:10, borderRadius:'50%', border:'1px solid '+t.textMuted }}/>}
-              {r.role.replace('_',' ')}
-            </div>;
-          })}
-        </div>
-      </div>
-    </MBRCard>}
+    {/* Approval Workflow Bar (real API) */}
+    <ApprovalWorkflowBar
+      mbrId={mbrId || mbr.id}
+      status={mbr.status}
+      signatures={signatures}
+      nextSignature={nextSig}
+      onSignRequest={(role) => setShowSign(true)}
+      t={t}
+    />
+
+    {/* Version History Panel */}
+    <VersionHistoryPanel
+      mbrId={mbrId || mbr.id}
+      currentVersion={mbr.current_version}
+      status={mbr.status}
+      t={t}
+      onVersionCreated={(result) => {
+        setMbr(p => ({ ...p, current_version: result.new_version, status: 'Draft' }));
+        setSignatures([]);
+        setNextSig('Author');
+      }}
+    />
 
     {/* View Toggle Tabs */}
     <div style={{ display:'flex', gap:4, marginBottom:16 }}>
@@ -1251,6 +1291,6 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
     </>}
 
     {/* E-Signature Modal */}
-    <ESignModal open={showSign} onClose={() => setShowSign(false)} onSign={handleSign} mbrCode={mbr.mbr_code} signatures={signatures} t={t}/>
+    <ESignModal open={showSign} onClose={() => setShowSign(false)} onSign={handleSign} mbrId={mbrId || mbr.id} mbrCode={mbr.mbr_code} signatures={signatures} t={t}/>
   </div>;
 }

@@ -13,8 +13,26 @@ const { logAudit } = require('../middleware/middleware');  // ← CHANGED from .
 // ════════════════════════════════════════════════════════════════════════
 
 async function parsePDF(filePath) {
-  // pdf-parse must be required at call time (lazy load)
-  const pdfParse = require('pdf-parse');
+  // pdf-parse has known export quirks across versions — handle all cases
+  let pdfParse;
+  try {
+    pdfParse = require('pdf-parse');
+    // Some versions export an object with .default
+    if (typeof pdfParse !== 'function') {
+      pdfParse = pdfParse.default || pdfParse.pdfParse || pdfParse;
+    }
+    // Last resort: use the internal lib directly
+    if (typeof pdfParse !== 'function') {
+      pdfParse = require('pdf-parse/lib/pdf-parse');
+    }
+  } catch (requireErr) {
+    throw new Error('pdf-parse package not installed. Run: npm install pdf-parse');
+  }
+
+  if (typeof pdfParse !== 'function') {
+    throw new Error('pdf-parse loaded but is not a function (type: ' + typeof pdfParse + '). Try: npm uninstall pdf-parse && npm install pdf-parse@1.1.1');
+  }
+
   const buffer = fs.readFileSync(filePath);
   const data = await pdfParse(buffer);
 
@@ -23,7 +41,6 @@ async function parsePDF(filePath) {
     pageCount: data.numpages,
     info: data.info || {},
     metadata: data.metadata || {},
-    // Split into pages by common page break patterns
     pages: data.text.split(/\f|\n{4,}/).filter(p => p.trim().length > 0),
   };
 }

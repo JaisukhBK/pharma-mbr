@@ -36,7 +36,7 @@ function Sel({ label, value, onChange, t, options }) {
   </div>;
 }
 
-export default function CoDesignerPanel({ mbrId, t, disabled, cdService, featuresService }) {
+export default function CoDesignerPanel({ mbrId, t, disabled, cdService, featuresService, onMbrCreated }) {
   const [mode, setMode] = useState('off');
   const [pipeStatus, setPipeStatus] = useState('idle');
   const [proposals, setProposals] = useState([]);
@@ -44,46 +44,95 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
   const [uploadResult, setUploadResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
-  const [activeTab, setActiveTab] = useState('proposals'); // proposals | documents | voice
+  const [activeTab, setActiveTab] = useState('proposals');
   const [showPwModal, setShowPwModal] = useState(false);
   const [pendingMode, setPendingMode] = useState(null);
   const [error, setError] = useState('');
   const [polling, setPolling] = useState(false);
-  // Documents state
   const [attachments, setAttachments] = useState([]);
-  // Voice state
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const [voiceHistory, setVoiceHistory] = useState([]);
   const [voiceCmd, setVoiceCmd] = useState('');
+  const [workingMbrId, setWorkingMbrId] = useState(mbrId);
   const voiceRef = useRef(null);
   const fileRef = useRef(null);
   const docRef = useRef(null);
 
-  useEffect(() => { if (mbrId && cdService) { fetchStatus(); loadAttachments(); } }, [mbrId]);
+  useEffect(() => { setWorkingMbrId(mbrId); }, [mbrId]);
+  useEffect(() => { if (workingMbrId && cdService) { fetchStatus(); loadAttachments(); } }, [workingMbrId]);
 
-  const fetchStatus = async () => { try { const s = await cdService.getCoDesignerStatus(mbrId); setMode(s.mode||'off'); setPipeStatus(s.status||'idle'); if (s.proposals) setMetrics(s.proposals); } catch {} };
-  const fetchProposals = async () => { try { const r = await cdService.listProposals(mbrId); setProposals(r.data||[]); } catch {} };
-  const loadAttachments = async () => { try { if (featuresService) { const r = await featuresService.listAttachments(mbrId); setAttachments(r.data||[]); } } catch {} };
+  const fetchStatus = async (id) => { const mid = id || workingMbrId; if (!mid) return; try { const s = await cdService.getCoDesignerStatus(mid); setPipeStatus(s.status||'idle'); if (s.proposals) setMetrics(s.proposals); } catch {} };
+  const fetchProposals = async (id) => { const mid = id || workingMbrId; if (!mid) return; try { const r = await cdService.listProposals(mid); const list = r.data||[]; setProposals(list); setMetrics({ total: list.length, pending: list.filter(p=>p.status==='pending').length, accepted: list.filter(p=>p.status==='accepted').length, rejected: list.filter(p=>p.status==='rejected').length }); } catch {} };
+  const loadAttachments = async (id) => { const mid = id || workingMbrId; if (!mid || !featuresService) return; try { const r = await featuresService.listAttachments(mid); setAttachments(r.data||[]); } catch {} };
 
-  const handleSwitch = (m) => { if (disabled||loading||m===mode) return; if (m==='co_design') { setPendingMode(m); setShowPwModal(true); return; } doToggle(m); };
-  const doToggle = async (target, pw) => {
+  // Co-Design auth is INDEPENDENT of MBR selection
+  const handleSwitch = (m) => {
+    if (loading || m === mode) return;
+    if (m === 'co_design') { setPendingMode(m); setShowPwModal(true); return; }
+    if (m === 'off') { setMode('off'); setShowPanel(false); return; }
+    // Assist mode
+    if (workingMbrId) { doToggleBackend(m); } else { setMode(m); }
+  };
+
+  const doToggleBackend = async (target, pw) => {
     setLoading(true); setError('');
-    try { await cdService.toggleCoDesigner(mbrId, target, pw); setMode(target); if (target!=='off') { fetchProposals(); setShowPanel(true); } }
+    try { await cdService.toggleCoDesigner(workingMbrId, target, pw); setMode(target); if (target!=='off') { fetchProposals(); setShowPanel(true); } }
     catch (e) { setError(e.message); } finally { setLoading(false); setShowPwModal(false); setPendingMode(null); }
   };
 
-  // PDF Upload
+  // Co-Design password verification — uses auth endpoint, no MBR needed
+  const doCoDesignAuth = async (pw) => {
+    setLoading(true); setError('');
+    try {
+      const token = localStorage.getItem('pharma_mbr_token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/verify-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || 'Password verification failed'); }
+      setMode('co_design');
+      setShowPanel(true);
+      // If we have a working MBR, also toggle on backend
+      if (workingMbrId) { try { await cdService.toggleCoDesigner(workingMbrId, 'co_design', pw); } catch {} }
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); setShowPwModal(false); setPendingMode(null); }
+  };
+
+  // PDF Upload — auto-creates a new MBR if none selected
   const handleUpload = async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
     if (!file.name.toLowerCase().endsWith('.pdf')) { setError('Only PDF files'); return; }
+    if (mode !== 'co_design') { setError('Authenticate Co-Design mode first (21 CFR Part 11 §11.200)'); return; }
     setLoading(true); setError(''); setUploadResult(null); setPipeStatus('parsing'); setActiveTab('proposals');
     try {
-      const result = await cdService.uploadPDF(mbrId, file);
+      let targetId = workingMbrId;
+      // Auto-create a new draft MBR if none selected
+      if (!targetId) {
+        const pdfName = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
+        const token = localStorage.getItem('pharma_mbr_token');
+        const createRes = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/mbr`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ product_name: pdfName || 'New MBR from PDF', dosage_form: 'Tablet', batch_size_unit: 'kg' }),
+        });
+        if (!createRes.ok) throw new Error('Failed to create MBR for PDF import');
+        const newMbr = await createRes.json();
+        targetId = newMbr.id;
+        setWorkingMbrId(targetId);
+        if (onMbrCreated) onMbrCreated();
+        // Toggle to assist mode (no password required) so upload is allowed
+        await cdService.toggleCoDesigner(targetId, 'assist');
+      } else {
+        // Ensure existing MBR has an active session
+        try { await cdService.toggleCoDesigner(targetId, 'assist'); } catch {}
+      }
+      const result = await cdService.uploadPDF(targetId, file);
       setUploadResult(result);
       if (result.ai_available) {
         setPolling(true); setPipeStatus('decomposing');
-        try { await cdService.pollUntilDone(mbrId, s => { setPipeStatus(s.status||'idle'); if (s.proposals) setMetrics(s.proposals); }, 2000, 90); fetchProposals(); setShowPanel(true); }
+        try { await cdService.pollUntilDone(targetId, s => { setPipeStatus(s.status||'idle'); if (s.proposals) setMetrics(s.proposals); }, 2000, 90); fetchProposals(targetId); setShowPanel(true); }
         catch (pe) { setError('Pipeline: '+pe.message); } finally { setPolling(false); }
       } else { setPipeStatus('awaiting_review'); setShowPanel(true); }
     } catch (e) { setError(e.message); setPipeStatus('error'); }
@@ -94,12 +143,12 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
   const handleDocUpload = async (e) => {
     const files = e.target.files; if (!files?.length || !featuresService) return;
     setLoading(true);
-    try { await featuresService.uploadAttachments(mbrId, [...files]); loadAttachments(); } catch(e) { setError(e.message); }
+    try { await featuresService.uploadAttachments(workingMbrId, [...files]); loadAttachments(); } catch(e) { setError(e.message); }
     finally { setLoading(false); if (docRef.current) docRef.current.value=''; }
   };
   const handleDocDelete = async (id) => {
     if (!confirm('Delete?') || !featuresService) return;
-    try { await featuresService.deleteAttachment(mbrId, id); loadAttachments(); } catch(e) { setError(e.message); }
+    try { await featuresService.deleteAttachment(workingMbrId, id); loadAttachments(); } catch(e) { setError(e.message); }
   };
 
   // Voice — AI Interactive
@@ -140,14 +189,15 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
   };
 
   // Reviews
-  const handleAccept = async (pid, notes) => { try { await cdService.reviewProposal(mbrId, pid, 'accepted', notes); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
-  const handleReject = async (pid, notes) => { try { await cdService.reviewProposal(mbrId, pid, 'rejected', notes); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
-  const handleModify = async (pid, data, notes) => { try { await cdService.reviewProposal(mbrId, pid, 'modified', notes||'Modified', data); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
-  const handleAcceptAll = async () => { if (!confirm('Accept all pending?')) return; setLoading(true); try { await cdService.acceptAllProposals(mbrId); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } finally { setLoading(false); } };
+  const handleAccept = async (pid, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'accepted', notes); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
+  const handleReject = async (pid, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'rejected', notes); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
+  const handleModify = async (pid, data, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'modified', notes||'Modified', data); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
+  const handleAcceptAll = async () => { if (!confirm('Accept all pending?')) return; setLoading(true); try { await cdService.acceptAllProposals(workingMbrId); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } finally { setLoading(false); } };
 
   const cur = MODES[mode]; const pipe = PIPELINE[pipeStatus]||PIPELINE.idle;
   const pendingCount = proposals.filter(p=>p.status==='pending').length;
   const isActive = mode !== 'off';
+  const isCoDesignAuthenticated = mode === 'co_design';
 
   return <div style={{ marginBottom:16 }}>
     {/* ── HEADER ── */}
@@ -170,12 +220,12 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
         {/* 3-way toggle */}
         <div style={{ display:'flex', gap:2, background:t.bgAlt, borderRadius:8, padding:3, border:'1px solid '+t.cardBorder }}>
           {Object.entries(MODES).map(([k,m])=>{ const I=m.icon; const a=mode===k;
-            return <button key={k} onClick={()=>handleSwitch(k)} disabled={disabled||loading} style={{ display:'flex',alignItems:'center',gap:4,padding:'5px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:disabled?'not-allowed':'pointer',border:'none',transition:'all 0.2s',opacity:disabled?0.4:1,background:a?m.color+'20':'transparent',color:a?m.color:t.textMuted,outline:a?'1px solid '+m.color+'40':'none' }}><I size={11}/>{m.label}{k==='co_design'&&<Lock size={9}/>}</button>;
+            return <button key={k} onClick={()=>handleSwitch(k)} disabled={loading} style={{ display:'flex',alignItems:'center',gap:4,padding:'5px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:loading?'not-allowed':'pointer',border:'none',transition:'all 0.2s',opacity:loading?0.4:1,background:a?m.color+'20':'transparent',color:a?m.color:t.textMuted,outline:a?'1px solid '+m.color+'40':'none' }}><I size={11}/>{m.label}{k==='co_design'&&<Lock size={9}/>}</button>;
           })}
         </div>
         {/* Upload MBR PDF */}
-        {isActive&&<><input ref={fileRef} type="file" accept=".pdf" onChange={handleUpload} style={{ display:'none' }}/><button onClick={()=>fileRef.current?.click()} disabled={disabled||loading||polling} style={{ display:'flex',alignItems:'center',gap:5,padding:'6px 12px',borderRadius:7,fontSize:11,fontWeight:600,cursor:'pointer',border:'1px solid '+t.accent+'30',background:t.accent+'10',color:t.accent,opacity:(loading||polling)?0.5:1 }}>{loading?<Loader2 size={12} style={{ animation:'spin 1s linear infinite' }}/>:<Upload size={12}/>}Upload MBR PDF</button></>}
-        {isActive&&<button onClick={()=>{setShowPanel(!showPanel);if(!showPanel)fetchProposals();}} style={{ background:'none',border:'none',cursor:'pointer',color:t.textMuted,padding:4,display:'flex' }}>{showPanel?<ChevronUp size={16}/>:<ChevronDown size={16}/>}</button>}
+        {isCoDesignAuthenticated&&<><input ref={fileRef} type="file" accept=".pdf" onChange={handleUpload} style={{ display:'none' }}/><button onClick={()=>fileRef.current?.click()} disabled={loading||polling} style={{ display:'flex',alignItems:'center',gap:5,padding:'6px 12px',borderRadius:7,fontSize:11,fontWeight:600,cursor:'pointer',border:'1px solid '+t.accent+'30',background:t.accent+'10',color:t.accent,opacity:(loading||polling)?0.5:1 }}>{loading?<Loader2 size={12} style={{ animation:'spin 1s linear infinite' }}/>:<Upload size={12}/>}Upload MBR PDF</button></>}
+        {isCoDesignAuthenticated&&<button onClick={()=>{setShowPanel(!showPanel);if(!showPanel)fetchProposals();}} style={{ background:'none',border:'none',cursor:'pointer',color:t.textMuted,padding:4,display:'flex' }}>{showPanel?<ChevronUp size={16}/>:<ChevronDown size={16}/>}</button>}
       </div>
     </div>
 
@@ -183,7 +233,7 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
     {error&&<div style={{ background:t.danger+'10',border:'1px solid '+t.danger+'30',borderRadius:8,padding:'8px 14px',marginTop:8,display:'flex',alignItems:'center',gap:8 }}><AlertTriangle size={13} color={t.danger}/><span style={{ color:t.danger,fontSize:12,flex:1 }}>{error}</span><button onClick={()=>setError('')} style={{ background:'none',border:'none',cursor:'pointer',color:t.danger }}><XCircle size={14}/></button></div>}
 
     {/* ── EXPANDED PANEL ── */}
-    {showPanel && isActive && <div style={{ background:t.card, border:'1px solid '+t.cardBorder, borderRadius:12, marginTop:8, overflow:'hidden' }}>
+    {showPanel && isCoDesignAuthenticated && <div style={{ background:t.card, border:'1px solid '+t.cardBorder, borderRadius:12, marginTop:8, overflow:'hidden' }}>
       {/* Tab bar: Proposals | Documents | Voice AI */}
       <div style={{ display:'flex', borderBottom:'1px solid '+t.cardBorder }}>
         {[
@@ -279,7 +329,7 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
       </div>
     </div>}
 
-    {showPwModal&&<PwModal t={t} onConfirm={pw=>doToggle(pendingMode,pw)} onCancel={()=>{setShowPwModal(false);setPendingMode(null);}}/>}
+    {showPwModal&&<PwModal t={t} onConfirm={pw=>doCoDesignAuth(pw)} onCancel={()=>{setShowPwModal(false);setPendingMode(null);}}/>}
 
     <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.7} }`}</style>
   </div>;

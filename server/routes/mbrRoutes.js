@@ -84,6 +84,23 @@ router.get('/:id', async (req, res) => {
   } catch (err) { console.error('[MBR] Get:', err); res.status(500).json({ error: 'Failed' }); }
 });
 
+// ═══ DELETE MBR ═══
+router.delete('/:id', authorize('mbr:write'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Check if MBR has active EBRs
+    const ebrs = await query("SELECT COUNT(*) as cnt FROM ebrs WHERE mbr_id=$1 AND status IN ('In Progress','Ready')", [id]);
+    if (parseInt(ebrs.rows[0].cnt) > 0) return res.status(400).json({ error: 'Cannot delete: MBR has active batch records' });
+    // Delete cascades (phases → steps → params etc.)
+    const r = await query('DELETE FROM mbrs WHERE id=$1 RETURNING mbr_code, product_name', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'MBR not found' });
+    // Also delete from master_batch_records (legacy FK table)
+    await query('DELETE FROM master_batch_records WHERE id=$1', [id]).catch(() => {});
+    await req.audit({ action: 'DELETE', resourceType: 'MBR', resourceId: id, details: 'Deleted: ' + r.rows[0].mbr_code + ' — ' + r.rows[0].product_name });
+    res.json({ deleted: true, mbr_code: r.rows[0].mbr_code });
+  } catch (err) { console.error('[MBR] Delete:', err); res.status(500).json({ error: 'Delete failed: ' + err.message }); }
+});
+
 // ═══ CREATE MBR ═══
 router.post('/', authorize('mbr:write'), async (req, res) => {
   try {
@@ -95,6 +112,14 @@ router.post('/', authorize('mbr:write'), async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [code, product_name, product_code, dosage_form||'Tablet', batch_size, batch_size_unit||'kg', description, strength, market, batch_type||'Production', sap_recipe_id, sap_material_number, req.session.userId]
     );
+    // Also insert into master_batch_records (M-002 FK target) — mbr_phases references this table
+    try {
+      await query(
+        `INSERT INTO master_batch_records (id, mbr_code, product_name, product_code, dosage_form, batch_size, batch_size_unit, description, status, current_version, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [r.rows[0].id, code, product_name, product_code, dosage_form||'Tablet', batch_size, batch_size_unit||'kg', description, 'Draft', 1, req.session.userId]
+      );
+    } catch (fkErr) { console.log('[MBR] master_batch_records sync:', fkErr.message); }
     await req.audit({ action:'CREATE', resourceType:'MBR', resourceId:r.rows[0].id, details:`Created MBR: ${code}` });
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: 'Failed' }); }
@@ -302,8 +327,34 @@ router.post('/:mbrId/sign', authorize('mbr:sign'), async (req, res) => {
     const mbrState = await query('SELECT * FROM mbrs WHERE id=$1', [req.params.mbrId]);
     if (mbrState.rows.length === 0) return res.status(404).json({ error: 'MBR not found' });
     const contentHash = crypto.createHash('sha256').update(JSON.stringify(mbrState.rows[0])+req.session.userId+signature_role).digest('hex');
-    const r = await query('INSERT INTO mbr_signatures (mbr_id,signer_id,signer_email,signature_role,signature_meaning,content_hash,password_verified,ip_address) VALUES ($1,$2,$3,$4,$5,$6,true,$7) RETURNING *',
-      [req.params.mbrId, req.session.userId, req.session.email, signature_role, signature_meaning, contentHash, req.ip]);
+
+    // Get or create version record (required by M-002 FK)
+    let versionId = null;
+    const hasVerCol = await query("SELECT column_name FROM information_schema.columns WHERE table_name='mbr_signatures' AND column_name='version_id' LIMIT 1");
+    if (hasVerCol.rows.length > 0) {
+      const verCol2 = (await query("SELECT column_name FROM information_schema.columns WHERE table_name='mbr_versions' AND column_name='version_number' LIMIT 1")).rows.length > 0 ? 'version_number' : 'version';
+      const snapCol2 = verCol2 === 'version_number' ? 'snapshot_data' : 'snapshot';
+      const existVer = await query(`SELECT id FROM mbr_versions WHERE mbr_id=$1 AND ${verCol2}=$2`, [req.params.mbrId, mbrState.rows[0].current_version]);
+      if (existVer.rows.length > 0) {
+        versionId = existVer.rows[0].id;
+      } else {
+        const snap = JSON.stringify(mbrState.rows[0]);
+        const newVer = await query(`INSERT INTO mbr_versions (mbr_id,${verCol2},change_reason,${snapCol2},content_hash,created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [req.params.mbrId, mbrState.rows[0].current_version, 'Auto-created for signature', snap, contentHash, req.session.userId]);
+        versionId = newVer.rows[0].id;
+      }
+    }
+
+    const sigCols = versionId
+      ? 'mbr_id,version_id,signer_id,signer_email,signature_role,signature_meaning,content_hash,password_verified,ip_address'
+      : 'mbr_id,signer_id,signer_email,signature_role,signature_meaning,content_hash,password_verified,ip_address';
+    const sigVals = versionId
+      ? '$1,$2,$3,$4,$5,$6,$7,true,$8'
+      : '$1,$2,$3,$4,$5,$6,true,$7';
+    const sigParams = versionId
+      ? [req.params.mbrId, versionId, req.session.userId, req.session.email, signature_role, signature_meaning, contentHash, req.ip]
+      : [req.params.mbrId, req.session.userId, req.session.email, signature_role, signature_meaning, contentHash, req.ip];
+    const r = await query(`INSERT INTO mbr_signatures (${sigCols}) VALUES (${sigVals}) RETURNING *`, sigParams);
 
     // State machine: apply status transition if this signature triggers one
     const oldStatus = mbrState.rows[0].status;
@@ -337,9 +388,41 @@ router.post('/:mbrId/new-version', authorize('mbr:write'), async (req, res) => {
     const ver = mbr.rows[0].current_version;
     const snap = JSON.stringify(mbr.rows[0]);
     const hash = crypto.createHash('sha256').update(snap).digest('hex');
-    await query('INSERT INTO mbr_versions (mbr_id,version,change_reason,snapshot,content_hash,created_by) VALUES ($1,$2,$3,$4,$5,$6)', [req.params.mbrId, ver, req.body.change_reason, snap, hash, req.session.userId]);
+    // Detect column names (M-002 vs M-007)
+    const hasCol = await query("SELECT column_name FROM information_schema.columns WHERE table_name='mbr_versions' AND column_name='version_number' LIMIT 1");
+    const verCol = hasCol.rows.length > 0 ? 'version_number' : 'version';
+    const snapCol = hasCol.rows.length > 0 ? 'snapshot_data' : 'snapshot';
+    await query(`INSERT INTO mbr_versions (mbr_id,${verCol},change_reason,${snapCol},content_hash,created_by) VALUES ($1,$2,$3,$4,$5,$6)`, [req.params.mbrId, ver, req.body.change_reason, snap, hash, req.session.userId]);
     await query(`UPDATE mbrs SET current_version=$1,status='Draft',approved_by=NULL,approved_at=NULL,updated_at=NOW() WHERE id=$2`, [ver+1, req.params.mbrId]);
     res.json({ new_version: ver+1, previous: ver });
+  } catch (err) { res.status(500).json({ error: 'Failed' }); }
+});
+
+// ═══ VERSION HISTORY ═══
+router.get('/:mbrId/versions', authorize('mbr:read'), async (req, res) => {
+  try {
+    // M-002 uses version_number/snapshot_data, M-007 uses version/snapshot — handle both
+    const hasCol = await query("SELECT column_name FROM information_schema.columns WHERE table_name='mbr_versions' AND column_name='version_number' LIMIT 1");
+    const verCol = hasCol.rows.length > 0 ? 'version_number' : 'version';
+    const snapCol = hasCol.rows.length > 0 ? 'snapshot_data' : 'snapshot';
+    const r = await query(
+      `SELECT v.id, v.mbr_id, v.${verCol} as version, v.change_reason, v.${snapCol} as snapshot, v.content_hash, v.created_by, v.created_at, u.full_name as created_by_name
+       FROM mbr_versions v LEFT JOIN users u ON v.created_by=u.id
+       WHERE v.mbr_id=$1 ORDER BY v.${verCol} DESC`, [req.params.mbrId]);
+    const mbr = await query('SELECT current_version, status FROM mbrs WHERE id=$1', [req.params.mbrId]);
+    res.json({ data: r.rows, current_version: mbr.rows[0]?.current_version, current_status: mbr.rows[0]?.status });
+  } catch (err) { console.error('[MBR] Versions error:', err.message); res.status(500).json({ error: 'Failed to get versions' }); }
+});
+
+// ═══ SIGNATURES LIST ═══
+router.get('/:mbrId/signatures', authorize('mbr:read'), async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT s.*, u.full_name as signer_name 
+       FROM mbr_signatures s LEFT JOIN users u ON s.signer_id=u.id 
+       WHERE s.mbr_id=$1 ORDER BY s.signed_at`, [req.params.mbrId]);
+    const next = await getNextRequiredSignature(req.params.mbrId);
+    res.json({ data: r.rows, next_signature: next });
   } catch (err) { res.status(500).json({ error: 'Failed' }); }
 });
 

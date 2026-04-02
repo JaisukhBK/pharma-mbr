@@ -108,6 +108,9 @@ export const mbrService = {
   // Signatures + Versioning + Audit
   signMBR: (mbrId, data) => f(`${MBR}/${mbrId}/sign`, { method: 'POST', body: JSON.stringify(data) }),
   createNewVersion: (mbrId, reason) => f(`${MBR}/${mbrId}/new-version`, { method: 'POST', body: JSON.stringify({ change_reason: reason }) }),
+  getVersions: (mbrId) => f(`${MBR}/${mbrId}/versions`),
+  getSignatures: (mbrId) => f(`${MBR}/${mbrId}/signatures`),
+  getTransitions: (mbrId) => f(`${MBR}/${mbrId}/transitions`),
   getAuditTrail: (mbrId, p = {}) => { const q = new URLSearchParams(p); return f(`${MBR}/${mbrId}/audit?${q}`); },
 
   // Batch save (used by MBRDesigner Save button)

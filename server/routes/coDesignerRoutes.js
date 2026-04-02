@@ -14,9 +14,17 @@ const router = Router();
 router.use(authenticate);
 router.use(auditMiddleware);
 
-// Multer config — store PDFs in server/uploads/
+// Multer config — store PDFs in /tmp (serverless) or server/uploads/ (local)
+const uploadsDir = process.env.NODE_ENV === 'production'
+  ? require('os').tmpdir()
+  : path.join(__dirname, '..', 'uploads');
+
+// Ensure directory exists
+const mkfs = require('fs');
+if (!mkfs.existsSync(uploadsDir)) mkfs.mkdirSync(uploadsDir, { recursive: true });
+
 const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', 'uploads'),
+  destination: uploadsDir,
   filename: (req, file, cb) => cb(null, `mbr-${Date.now()}-${file.originalname}`),
 });
 const upload = multer({
@@ -100,7 +108,7 @@ router.post('/:mbrId/upload-pdf', authorize('co_designer:toggle'), upload.single
       const buf = Buffer.from(req.body.pdf_base64, 'base64');
       pdfHash = crypto.createHash('sha256').update(buf).digest('hex');
       filename = req.body.filename || 'uploaded.pdf';
-      filePath = path.join(__dirname, '..', 'uploads', `mbr-${Date.now()}-${filename}`);
+      filePath = path.join(uploadsDir, `mbr-${Date.now()}-${filename}`);
       fs.writeFileSync(filePath, buf);
     } else {
       return res.status(400).json({ error: 'PDF file required (multipart or base64)' });
@@ -200,7 +208,6 @@ router.get('/:mbrId/extracted-text', authorize('co_designer:review'), async (req
 
     // Find the PDF file
     const fs = require('fs');
-    const uploadsDir = path.join(__dirname, '..', 'uploads');
     const files = fs.readdirSync(uploadsDir).filter(f => f.endsWith('.pdf')).sort().reverse();
     if (files.length === 0) return res.status(404).json({ error: 'No PDF found' });
 

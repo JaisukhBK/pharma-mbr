@@ -9,7 +9,7 @@ import {
   AlertOctagon, RefreshCw, Settings, ClipboardList, Wrench,
   Zap, Box, Radio, ChevronDown, ChevronUp, TrendingUp, Package,
   Users, Terminal, Menu, Send, MessageSquare, Activity,
-  ChevronLeft, RotateCw, Upload, Download, Copy
+  ChevronLeft, RotateCw, Upload, Download, Copy, Trash2
 } from 'lucide-react';
 
 import { authService, mbrService, cdService, featuresService } from './services/apiService';
@@ -1008,6 +1008,18 @@ function MBRListView({ t, user, onSelectMBR }) {
     catch(err) { alert('Duplicate error: '+err.message); }
   };
 
+  const handleDelete = async () => {
+    if (!selectedId) return;
+    const mbr = mbrs.find(m => m.id === selectedId);
+    if (!confirm('DELETE "' + (mbr?.product_name||'this MBR') + '"?\n\nThis cannot be undone.')) return;
+    try {
+      const token = localStorage.getItem('pharma_mbr_token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/mbr/${selectedId}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error || 'Delete failed'); }
+      setSelectedId(null); load(); setActionMsg('MBR deleted'); setTimeout(()=>setActionMsg(''),3000);
+    } catch(err) { alert('Delete error: '+err.message); }
+  };
+
   const selectedMbr = mbrs.find(m => m.id === selectedId);
   const hasSelection = !!selectedId;
   const tbBtn = (icon, label, onClick, disabled) => (
@@ -1033,6 +1045,8 @@ function MBRListView({ t, user, onSelectMBR }) {
         <div style={{width:1,height:20,background:t.cardBorder}}/>
         {tbBtn(<Download size={12}/>,'Export XML',handleExportXML,!hasSelection)}
         {tbBtn(<Copy size={12}/>,'Duplicate',handleDuplicate,!hasSelection)}
+        <div style={{width:1,height:20,background:t.cardBorder}}/>
+        {tbBtn(<Trash2 size={12}/>,'Delete',handleDelete,!hasSelection)}
         <div style={{flex:1}}/>
         {hasSelection && <span style={{fontSize:10,color:t.accent,fontFamily:"'DM Mono',monospace"}}>Selected: {selectedMbr?.mbr_code}</span>}
         {actionMsg && <span style={{fontSize:10,color:t.success,fontWeight:600}}>{actionMsg}</span>}
@@ -1040,7 +1054,7 @@ function MBRListView({ t, user, onSelectMBR }) {
 
       {/* AI Co-Designer */}
       <div style={{marginBottom:12}}>
-        <CoDesignerPanel mbrId={selectedId} t={t} disabled={!hasSelection} cdService={cdService} featuresService={featuresService}/>
+        <CoDesignerPanel mbrId={selectedId} t={t} disabled={false} cdService={cdService} featuresService={featuresService} onMbrCreated={()=>load()}/>
       </div>
 
       {/* Search */}
