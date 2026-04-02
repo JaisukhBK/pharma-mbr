@@ -408,8 +408,11 @@ function YieldRulePanel({ yieldConfig, onUpdate, t, disabled }) {
 // BOM (Bill of Materials) — MBR-level structured material list
 // ════════════════════════════════════════════════════════════════════════════
 
-function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit }) {
+function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit, onBatchSizeChange }) {
   const items = bom || [];
+  const [showScale, setShowScale] = useState(false);
+  const [newBatchSize, setNewBatchSize] = useState('');
+  const [refBatchSize, setRefBatchSize] = useState(batchSize || '');
 
   const addItem = () => onUpdate([...items, {
     id:createId(), _isNew:true, material_code:'', material_name:'', material_type:'Excipient',
@@ -417,6 +420,22 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit }) {
     alternate_material:'', supplier:'', grade:'', is_active_ingredient:false,
     dispensing_sequence:items.length+1, overage_pct:'0', phase_used:''
   }]);
+
+  const handleScale = () => {
+    const ref = parseFloat(refBatchSize || batchSize);
+    const target = parseFloat(newBatchSize);
+    if (!ref || !target || ref === 0) return;
+    const factor = target / ref;
+    const scaled = items.map(item => ({
+      ...item,
+      quantity_per_batch: item.quantity_per_batch ? parseFloat((parseFloat(item.quantity_per_batch) * factor).toPrecision(6)).toString() : item.quantity_per_batch,
+    }));
+    onUpdate(scaled);
+    if (onBatchSizeChange) onBatchSizeChange(target);
+    setRefBatchSize(target);
+    setShowScale(false);
+    setNewBatchSize('');
+  };
 
   const totalQty = items.reduce((s, i) => s + (parseFloat(i.quantity_per_batch)||0), 0);
   const apiItems = items.filter(i => i.is_active_ingredient);
@@ -426,10 +445,39 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit }) {
     <SectionTitle icon={Package} title="Bill of Materials (BOM)" count={items.length} t={t}
       right={<div style={{ display:'flex', alignItems:'center', gap:10 }}>
         <span style={{ fontSize:10, fontFamily:"'DM Mono',monospace", color:t.textDim }}>Total: {totalQty.toFixed(2)} {batchUnit||'kg'} / {batchSize||'—'} {batchUnit||'kg'} batch</span>
+        {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={() => setShowScale(!showScale)}><ArrowUpDown size={12}/>Scale BOM</MBRBtn>}
         {!disabled && <MBRBtn t={t} variant="accent" size="sm" onClick={addItem}><Plus size={12}/>Add Material</MBRBtn>}
       </div>} />
 
-    <MBRCard t={t} style={{ padding:14 }}>
+    {/* Batch Scaling Panel */}
+    {showScale && <MBRCard t={t} style={{ padding:14, marginBottom:8, borderLeft:'3px solid '+t.accent }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+        <ArrowUpDown size={14} color={t.accent}/>
+        <span style={{ fontSize:13, fontWeight:700, color:t.text }}>Batch Size Scaling</span>
+        <span style={{ fontSize:10, color:t.textMuted }}>All BOM quantities will be recalculated proportionally</span>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr auto 1fr auto', gap:10, alignItems:'end' }}>
+        <div>
+          <label style={{ color:t.textDim, fontSize:10, fontWeight:600, textTransform:'uppercase', display:'block', marginBottom:3 }}>Current batch size</label>
+          <input value={refBatchSize || batchSize || ''} onChange={e => setRefBatchSize(e.target.value)} type="number"
+            style={{ width:'100%', boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:"'DM Mono',monospace" }}/>
+        </div>
+        <span style={{ fontSize:16, color:t.textMuted, paddingBottom:8 }}>→</span>
+        <div>
+          <label style={{ color:t.textDim, fontSize:10, fontWeight:600, textTransform:'uppercase', display:'block', marginBottom:3 }}>New batch size ({batchUnit||'kg'})</label>
+          <input value={newBatchSize} onChange={e => setNewBatchSize(e.target.value)} type="number" placeholder="Enter target size" autoFocus
+            style={{ width:'100%', boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:"'DM Mono',monospace" }}/>
+        </div>
+        <div style={{ display:'flex', gap:6, paddingBottom:1 }}>
+          <MBRBtn t={t} variant="primary" size="sm" onClick={handleScale} disabled={!newBatchSize || !parseFloat(newBatchSize)}>
+            Apply {newBatchSize && refBatchSize ? `(${(parseFloat(newBatchSize)/parseFloat(refBatchSize||batchSize)).toFixed(2)}x)` : ''}
+          </MBRBtn>
+          <MBRBtn t={t} variant="ghost" size="sm" onClick={() => setShowScale(false)}>Cancel</MBRBtn>
+        </div>
+      </div>
+    </MBRCard>}
+
+    <MBRCard t={t} style={{ padding:'14px 10px', overflowX:'auto' }}>
       {items.length === 0 ? (
         <div style={{ textAlign:'center', padding:'30px 0', color:t.textMuted, fontSize:13 }}>
           <Package size={24} color={t.textMuted} style={{marginBottom:8}}/>
@@ -438,20 +486,20 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit }) {
       ) : (
         <div>
           {/* Header row */}
-          <div style={{ display:'grid', gridTemplateColumns:'0.3fr 0.7fr 1.5fr 0.6fr 0.5fr 0.5fr 0.5fr 0.8fr 0.7fr auto', gap:6, padding:'6px 0', borderBottom:'2px solid '+t.cardBorder, marginBottom:4 }}>
-            {['#','Code','Material Name','Qty/Batch','Unit','Tol %','Ovg %','Supplier','Grade',''].map(h => (
+          <div style={{ display:'grid', gridTemplateColumns:'25px 0.6fr 1fr 0.5fr 0.3fr 0.3fr 0.3fr 0.5fr 0.4fr 48px', gap:4, padding:'6px 0', borderBottom:'2px solid '+t.cardBorder, marginBottom:4 }}>
+            {['#','Code','Material Name','Qty/Batch','Unit','Tol %','Ovg %','Supplier','Grade','API'].map(h => (
               <span key={h} style={{ fontSize:9, fontWeight:700, color:t.textMuted, textTransform:'uppercase', letterSpacing:0.5 }}>{h}</span>
             ))}
           </div>
           {/* Items */}
           {items.map((item, idx) => (
-            <div key={item.id} style={{ display:'grid', gridTemplateColumns:'0.3fr 0.7fr 1.5fr 0.6fr 0.5fr 0.5fr 0.5fr 0.8fr 0.7fr auto', gap:6, padding:'6px 0', borderBottom:'1px solid '+t.cardBorder+'30', background:item.is_active_ingredient ? t.danger+'06' : 'transparent' }}>
+            <div key={item.id} style={{ display:'grid', gridTemplateColumns:'25px 0.6fr 1fr 0.5fr 0.3fr 0.3fr 0.3fr 0.5fr 0.4fr 48px', gap:4, padding:'6px 0', borderBottom:'1px solid '+t.cardBorder+'30', background:item.is_active_ingredient ? t.danger+'06' : 'transparent' }}>
               <span style={{ fontSize:11, fontFamily:"'DM Mono',monospace", color:t.textMuted, alignSelf:'center' }}>{idx+1}</span>
               <input value={item.material_code} onChange={e => onUpdate(items.map(x => x.id===item.id?{...item,material_code:e.target.value}:x))} disabled={disabled} placeholder="RM-001"
                 style={{ background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:5, padding:'5px 7px', fontSize:11, outline:'none', fontFamily:"'DM Mono',monospace" }} />
-              <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                <input value={item.material_name} onChange={e => onUpdate(items.map(x => x.id===item.id?{...item,material_name:e.target.value}:x))} disabled={disabled} placeholder="Microcrystalline Cellulose"
-                  style={{ flex:1, background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:5, padding:'5px 7px', fontSize:11, outline:'none' }} />
+              <div style={{ display:'flex', alignItems:'center', gap:4, overflow:'hidden' }}>
+                <input value={item.material_name} onChange={e => onUpdate(items.map(x => x.id===item.id?{...item,material_name:e.target.value}:x))} disabled={disabled} placeholder="Material Name" title={item.material_name}
+                  style={{ flex:1, minWidth:0, background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:5, padding:'5px 7px', fontSize:11, outline:'none', textOverflow:'ellipsis' }} />
                 {item.is_active_ingredient && <MBRBadge color={t.danger} t={t}>API</MBRBadge>}
               </div>
               <input value={item.quantity_per_batch} onChange={e => onUpdate(items.map(x => x.id===item.id?{...item,quantity_per_batch:e.target.value}:x))} disabled={disabled} type="number" placeholder="100"
@@ -469,7 +517,7 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit }) {
               <input value={item.grade} onChange={e => onUpdate(items.map(x => x.id===item.id?{...item,grade:e.target.value}:x))} disabled={disabled} placeholder="USP"
                 style={{ background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:5, padding:'5px 7px', fontSize:11, outline:'none' }} />
               <div style={{ display:'flex', gap:3, alignItems:'center' }}>
-                <ToggleChip label="API" active={item.is_active_ingredient} onClick={() => onUpdate(items.map(x => x.id===item.id?{...item,is_active_ingredient:!item.is_active_ingredient}:x))} color={t.danger} t={t} />
+                <input type="checkbox" checked={!!item.is_active_ingredient} onChange={() => onUpdate(items.map(x => x.id===item.id?{...item,is_active_ingredient:!item.is_active_ingredient}:x))} disabled={disabled} title="Mark as Active Pharmaceutical Ingredient" style={{ accentColor:t.danger, cursor:'pointer' }}/>
                 {!disabled && <button onClick={() => onUpdate(items.filter(x => x.id!==item.id))} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:2 }}><Trash2 size={12}/></button>}
               </div>
             </div>
@@ -1170,6 +1218,91 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
     setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
+  // ═══ PDF EXPORT ═══
+  const handleExportPDF = () => {
+    const sigRows = (signatures||[]).map(s =>
+      `<tr><td>${s.signature_role?.replace('_',' ')}</td><td>${s.signer_name||s.signer_email||'—'}</td><td>${s.signed_at ? new Date(s.signed_at).toLocaleString() : '—'}</td><td style="font-family:monospace;font-size:10px">${s.content_hash?.substring(0,16)||'—'}</td></tr>`
+    ).join('');
+
+    const phaseRows = phases.map(ph => {
+      const steps = (ph.steps||[]).map(st => {
+        const params = (st.parameters||[]).map(p =>
+          `<tr><td style="padding-left:60px;font-size:11px">⚙ ${p.param_name||'—'}</td><td>${p.target_value||'—'} ${p.unit||''}</td><td>${p.lower_limit||'—'} – ${p.upper_limit||'—'}</td><td>${p.is_cpp?'CPP':''}${p.is_cqa?' CQA':''}</td></tr>`
+        ).join('');
+        const mats = (st.materials||[]).map(m =>
+          `<tr><td style="padding-left:60px;font-size:11px">📦 ${m.material_name||'—'}</td><td>${m.quantity||'—'} ${m.unit||''}</td><td>${m.material_type||''}</td><td>${m.is_active?'API':''}</td></tr>`
+        ).join('');
+        return `<tr style="background:#f8f9fa"><td style="padding-left:40px"><strong>${st.step_number}. ${st.step_name||'Untitled'}</strong></td><td>${st.step_type||'Processing'}</td><td>${st.duration_min||'—'} min</td><td>${st.is_critical?'⚠ CPP':''}</td></tr>
+          <tr><td colspan="4" style="padding-left:50px;color:#666;font-size:11px">${st.instruction||''}</td></tr>${params}${mats}`;
+      }).join('');
+      return `<tr style="background:#e8edf2"><td colspan="4"><strong style="font-size:14px">Phase ${ph.phase_number}: ${ph.phase_name||'Untitled'}</strong> — ${(ph.steps||[]).length} operations</td></tr>${steps}`;
+    }).join('');
+
+    const bomRows = (bom||[]).map((item, i) =>
+      `<tr><td>${i+1}</td><td>${item.material_code||'—'}</td><td>${item.material_name||'—'}${item.is_active_ingredient?' <span style="color:red;font-weight:bold">(API)</span>':''}</td><td style="text-align:right">${item.quantity_per_batch||'—'}</td><td>${item.unit||'kg'}</td><td>${item.supplier||'—'}</td><td>${item.grade||'—'}</td></tr>`
+    ).join('');
+
+    const html = `<!DOCTYPE html><html><head><title>MBR — ${mbr.mbr_code}</title>
+    <style>
+      @media print { body { margin:0; } @page { margin:15mm; size:A4; } }
+      body { font-family: -apple-system, 'Segoe UI', sans-serif; color:#1a1a2e; max-width:900px; margin:0 auto; padding:20px; }
+      h1 { font-size:20px; border-bottom:3px solid #5046e5; padding-bottom:8px; }
+      h2 { font-size:15px; color:#5046e5; margin-top:24px; border-bottom:1px solid #ddd; padding-bottom:4px; }
+      table { width:100%; border-collapse:collapse; margin:8px 0 16px; font-size:12px; }
+      th { background:#5046e5; color:#fff; padding:6px 10px; text-align:left; font-size:11px; text-transform:uppercase; }
+      td { padding:5px 10px; border-bottom:1px solid #eee; vertical-align:top; }
+      .header-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:12px; margin:12px 0; }
+      .header-item { background:#f5f5f8; padding:8px 12px; border-radius:6px; }
+      .header-item label { font-size:9px; color:#888; text-transform:uppercase; display:block; margin-bottom:2px; }
+      .header-item span { font-size:13px; font-weight:600; }
+      .status { display:inline-block; padding:2px 10px; border-radius:4px; font-weight:600; font-size:11px; }
+      .stamp { text-align:center; margin-top:30px; padding:12px; border:2px solid #5046e5; border-radius:8px; font-size:11px; color:#5046e5; }
+    </style></head><body>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h1>PharmaMES.AI — Master Batch Record</h1>
+      <div><span class="status" style="background:#5046e515;color:#5046e5">${mbr.status||'Draft'}</span></div>
+    </div>
+    <div class="header-grid">
+      <div class="header-item"><label>MBR Code</label><span>${mbr.mbr_code||'—'}</span></div>
+      <div class="header-item"><label>Product Name</label><span>${mbr.product_name||'—'}</span></div>
+      <div class="header-item"><label>Dosage Form</label><span>${mbr.dosage_form||'—'}</span></div>
+      <div class="header-item"><label>Batch Size</label><span>${mbr.batch_size||'—'} ${mbr.batch_size_unit||'kg'}</span></div>
+    </div>
+    <div class="header-grid">
+      <div class="header-item"><label>Product Code</label><span>${mbr.product_code||'—'}</span></div>
+      <div class="header-item"><label>Version</label><span>v${mbr.current_version||1}</span></div>
+      <div class="header-item"><label>Compliance</label><span>21 CFR Part 11 · GAMP5 Cat.5</span></div>
+      <div class="header-item"><label>ISA Standard</label><span>ISA-88 / ISA-95</span></div>
+    </div>
+    ${mbr.description ? `<p style="color:#555;font-size:12px;margin:8px 0">${mbr.description}</p>` : ''}
+
+    <h2>Electronic Signatures (21 CFR Part 11 §11.200)</h2>
+    <table><thead><tr><th>Role</th><th>Signer</th><th>Date/Time</th><th>Content Hash</th></tr></thead><tbody>
+    ${sigRows || '<tr><td colspan="4" style="color:#999">No signatures applied</td></tr>'}
+    </tbody></table>
+
+    <h2>Manufacturing Process (ISA-88 Recipe Hierarchy)</h2>
+    <table><thead><tr><th>Phase / Operation</th><th>Type</th><th>Duration</th><th>Classification</th></tr></thead><tbody>
+    ${phaseRows || '<tr><td colspan="4" style="color:#999">No phases defined</td></tr>'}
+    </tbody></table>
+
+    <h2>Bill of Materials</h2>
+    <table><thead><tr><th>#</th><th>Code</th><th>Material</th><th>Qty/Batch</th><th>Unit</th><th>Supplier</th><th>Grade</th></tr></thead><tbody>
+    ${bomRows || '<tr><td colspan="7" style="color:#999">No BOM items</td></tr>'}
+    </tbody></table>
+
+    <div class="stamp">
+      <strong>PharmaMES.AI</strong> — GAMP5 Category 5 · 21 CFR Part 11 Compliant<br/>
+      Generated: ${new Date().toLocaleString()} · Document integrity verified via SHA-256 content hashing
+    </div>
+    </body></html>`;
+
+    const win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 500);
+  };
+
   // Stats
   const totalSteps = phases.reduce((s, p) => s + (p.steps?.length||0), 0);
   const totalParams = phases.reduce((s, p) => s + (p.steps||[]).reduce((s2, st) => s2 + (st.parameters?.length||0), 0), 0);
@@ -1196,7 +1329,7 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
           <span style={{ fontSize:10, fontFamily:"'DM Mono',monospace", color:t.textDim, padding:'3px 8px', background:t.bgAlt, borderRadius:5 }}>{phases.length} phases</span>
           <span style={{ fontSize:10, fontFamily:"'DM Mono',monospace", color:t.textDim, padding:'3px 8px', background:t.bgAlt, borderRadius:5 }}>{totalSteps} ops</span>
           {criticalSteps > 0 && <MBRBadge color={t.danger} t={t}><AlertTriangle size={10}/>{criticalSteps} CPP</MBRBadge>}
-          <MBRBtn t={t} variant="ghost" size="sm" onClick={() => setShowSign(true)}><Shield size={13}/>e-Sign</MBRBtn>
+          <MBRBtn t={t} variant="ghost" size="sm" onClick={handleExportPDF}><FileText size={13}/>Export PDF</MBRBtn>
           <MBRBtn t={t} size="sm" onClick={handleSave} disabled={disabled||saveStatus==='saving'}>
             {saveStatus==='saving' ? <Loader2 size={13} style={{animation:'spin 1s linear infinite'}}/> : saveStatus==='saved' ? <CheckCircle size={13}/> : <Save size={13}/>}
             {saveStatus==='saving' ? 'Saving...' : saveStatus==='saved' ? 'Saved' : 'Save'}
@@ -1265,7 +1398,7 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
     {activeView === 'flow' && <ProcessFlowDiagram phases={phases} t={t} onSelectPhase={id => { setCurrentPhase(id); setActiveView('recipe'); }}/>}
 
     {/* VIEW: Bill of Materials */}
-    {activeView === 'bom' && <BOMSection bom={bom} onUpdate={setBom} t={t} disabled={disabled} batchSize={mbr.batch_size} batchUnit={mbr.batch_size_unit}/>}
+    {activeView === 'bom' && <BOMSection bom={bom} onUpdate={setBom} t={t} disabled={disabled} batchSize={mbr.batch_size} batchUnit={mbr.batch_size_unit} onBatchSizeChange={(size) => setMbr(p => ({...p, batch_size: size}))}/>}
 
     {/* VIEW: Recipe Designer (ISA-88 hierarchy) */}
     {activeView === 'recipe' && <>

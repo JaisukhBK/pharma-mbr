@@ -974,7 +974,7 @@ function MBRListView({ t, user, onSelectMBR }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await mbrService.listMBRs({ search: search||undefined }); setMbrs(r.data||[]); }
+    try { const params = {}; if (search && search.trim()) params.search = search.trim(); const r = await mbrService.listMBRs(params); setMbrs(r.data||[]); }
     catch(err) { console.error(err); }
     finally { setLoading(false); }
   }, [search]);
