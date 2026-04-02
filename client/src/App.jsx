@@ -17,6 +17,7 @@ import MBRDesigner from './components/MBRDesigner/MBRDesigner';
 import CoDesignerPanel from './components/MBRDesigner/CoDesignerPanel';
 import MBRFeaturesToolbar from './components/MBRDesigner/MBRFeaturesToolbar';
 import OperationFormulaPanel from './components/MBRDesigner/OperationFormulaPanel';
+import EBRExecution from './components/EBRExecution';
 
 const API = import.meta.env.VITE_API_URL || '';
 
@@ -1163,7 +1164,7 @@ function SectionView({ section, t, user, onSelectMBR }) {
   switch(section) {
     case 'overview':     return <OverviewDashboard t={t} user={user}/>;
     case 'mbr':          return <MBRListView t={t} user={user} onSelectMBR={onSelectMBR}/>;
-    case 'ebr':          return <EBRView t={t} title="EBR Execution" icon={ClipboardList} description="Shop floor electronic batch record execution engine"/>;
+    case 'ebr':          return <EBRExecution t={t} user={user}/>;
     case 'batches':      return <EBRView t={t} title="Batches" icon={Package} description="All executed batches and release status"/>;
     case 'genealogy':    return <GenealogyView t={t}/>;
     case 'equipment_qm': return <EquipmentQMView t={t}/>;

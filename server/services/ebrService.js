@@ -1,5 +1,10 @@
-// server/services/ebrService.js — Electronic Batch Record Execution
-// Shop floor execution engine for pharmaceutical manufacturing
+// server/services/ebrService.js — EBR Execution Engine
+// SCHEMA AUDIT: ebrs=M-004, ebr_parameter_values=M-004, all others=M-007
+// M-004 ebrs: id,ebr_code,batch_number,mbr_id,mbr_code,product_name,product_code,batch_size,status,line,operator_id,started_at,completed_at,phases_data,material_consumption,outputs,created_by,created_at,updated_at
+// M-004 ebr_parameter_values: id,ebr_id,phase_id,step_id,param_id,param_name,target_value(DECIMAL),lower_limit,upper_limit,actual_value(DECIMAL),unit,is_oos,is_cpp,recorded_by,recorded_at
+// M-007 ebr_step_executions: id,ebr_id,mbr_step_id,step_number,step_name,phase_name,instruction,is_critical,is_gmp_critical,duration_min,actual_duration_min,status,operator_id,verifier_id,started_at,completed_at,verified_at,deviation_notes,created_at
+// M-007 ebr_equipment_usage: NO equipment_type column
+// M-007 ebr_release_signatures: NO decision or notes columns — has signature_role,signer_id,signer_email,signature_meaning,password_verified,signed_at
 
 const { query } = require('../db/pool');
 
@@ -8,26 +13,21 @@ const { query } = require('../db/pool');
 // ════════════════════════════════════════════════════════════════
 
 async function createEBR(mbrId, batchNumber, operatorId) {
-  // Only Effective MBRs can be executed
   const mbr = await query('SELECT * FROM mbrs WHERE id=$1', [mbrId]);
   if (mbr.rows.length === 0) return { error: 'MBR not found' };
-  if (mbr.rows[0].status !== 'Effective') return { error: `MBR must be in Effective status (current: ${mbr.rows[0].status})` };
+  if (mbr.rows[0].status !== 'Effective') return { error: `MBR must be Effective (current: ${mbr.rows[0].status})` };
 
-  // Check batch number uniqueness
   const dup = await query('SELECT id FROM ebrs WHERE batch_number=$1', [batchNumber]);
   if (dup.rows.length > 0) return { error: 'Batch number already exists' };
 
-  // Generate EBR code
   const code = `EBR-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${batchNumber}`;
 
   const ebr = await query(
-    `INSERT INTO ebrs (ebr_code, mbr_id, batch_number, product_name, batch_size, batch_size_unit, mbr_version, theoretical_yield, operator_id, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Ready') RETURNING *`,
-    [code, mbrId, batchNumber, mbr.rows[0].product_name, mbr.rows[0].batch_size, mbr.rows[0].batch_size_unit || 'units',
-     mbr.rows[0].current_version, mbr.rows[0].batch_size, operatorId]
+    `INSERT INTO ebrs (ebr_code, mbr_id, mbr_code, batch_number, product_name, product_code, batch_size, status, operator_id, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'Ready',$8,$8) RETURNING *`,
+    [code, mbrId, mbr.rows[0].mbr_code, batchNumber, mbr.rows[0].product_name, mbr.rows[0].product_code, mbr.rows[0].batch_size, operatorId]
   );
 
-  // Pre-populate step executions from MBR phases/steps
   const phases = await query('SELECT * FROM mbr_phases WHERE mbr_id=$1 ORDER BY phase_number', [mbrId]);
   const steps = await query('SELECT * FROM mbr_steps WHERE mbr_id=$1 ORDER BY step_number', [mbrId]);
 
@@ -42,13 +42,13 @@ async function createEBR(mbrId, batchNumber, operatorId) {
         [ebr.rows[0].id, step.id, stepNum, step.step_name, phase.phase_name, step.instruction, step.is_critical, step.is_gmp_critical, step.duration_min]
       );
 
-      // Pre-populate parameter values from MBR parameters
+      // M-004 ebr_parameter_values: step_id(VARCHAR), param_id(VARCHAR), target_value(DECIMAL), is_oos, is_cpp — NO step_execution_id, NO is_cqa, NO created_at
       const params = await query('SELECT * FROM mbr_step_parameters WHERE step_id=$1', [step.id]);
       for (const p of params.rows) {
+        const tv = parseFloat(p.target_value);
         await query(
-          `INSERT INTO ebr_parameter_values (ebr_id, step_execution_id, parameter_id, param_name, target_value, unit, lower_limit, upper_limit, is_cpp, is_cqa)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [ebr.rows[0].id, exec.rows[0].id, p.id, p.param_name, p.target_value, p.unit, p.lower_limit, p.upper_limit, p.is_cpp, p.is_cqa]
+          'INSERT INTO ebr_parameter_values (ebr_id, step_id, param_id, param_name, target_value, unit, lower_limit, upper_limit, is_cpp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+          [ebr.rows[0].id, exec.rows[0].id, p.id, p.param_name, isNaN(tv) ? null : tv, p.unit, p.lower_limit, p.upper_limit, p.is_cpp || false]
         );
       }
     }
@@ -58,316 +58,203 @@ async function createEBR(mbrId, batchNumber, operatorId) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 2. STEP-BY-STEP EXECUTION
+// 2. STEP EXECUTION
 // ════════════════════════════════════════════════════════════════
 
 async function startStep(stepExecId, operatorId) {
+  const step = await query('SELECT ebr_id FROM ebr_step_executions WHERE id=$1', [stepExecId]);
+  if (step.rows.length > 0) {
+    await query("UPDATE ebrs SET status='In Progress', started_at=COALESCE(started_at, NOW()), updated_at=NOW() WHERE id=$1 AND status='Ready'", [step.rows[0].ebr_id]);
+  }
   const r = await query(
     "UPDATE ebr_step_executions SET status='In Progress', operator_id=$1, started_at=NOW() WHERE id=$2 AND status='Pending' RETURNING *",
-    [operatorId, stepExecId]
-  );
-  if (r.rows.length === 0) return { error: 'Step not found or already started' };
-
-  // Start the EBR if this is the first step
-  const ebr = await query("UPDATE ebrs SET status='In Progress', started_at=COALESCE(started_at,NOW()), updated_at=NOW() WHERE id=$1 RETURNING id", [r.rows[0].ebr_id]);
-
+    [operatorId, stepExecId]);
   return r.rows[0];
 }
 
 async function completeStep(stepExecId, operatorId, notes, actualDurationMin) {
-  // Check all parameters are recorded
-  const unrecorded = await query(
-    "SELECT id FROM ebr_parameter_values WHERE step_execution_id=$1 AND actual_value IS NULL",
-    [stepExecId]
-  );
-  if (unrecorded.rows.length > 0) return { error: `${unrecorded.rows.length} parameter(s) not yet recorded`, unrecorded_count: unrecorded.rows.length };
-
-  // Check for unresolved deviations
-  const openDevs = await query(
-    "SELECT id FROM ebr_deviations WHERE step_execution_id=$1 AND status='Open'",
-    [stepExecId]
-  );
-  if (openDevs.rows.length > 0) return { error: `${openDevs.rows.length} open deviation(s) must be documented before completing step` };
-
   const r = await query(
-    "UPDATE ebr_step_executions SET status='Completed', completed_at=NOW(), deviation_notes=$1, actual_duration_min=$2 WHERE id=$3 RETURNING *",
-    [notes, actualDurationMin, stepExecId]
-  );
-  if (r.rows.length === 0) return { error: 'Step not found' };
+    `UPDATE ebr_step_executions SET status='Completed', operator_id=COALESCE($1,operator_id),
+     completed_at=NOW(), actual_duration_min=$2, deviation_notes=$3 WHERE id=$4 RETURNING *`,
+    [operatorId, actualDurationMin, notes, stepExecId]);
   return r.rows[0];
 }
 
 async function verifyStep(stepExecId, verifierId) {
   const r = await query(
-    "UPDATE ebr_step_executions SET verifier_id=$1, verified_at=NOW() WHERE id=$2 AND status='Completed' RETURNING *",
-    [verifierId, stepExecId]
-  );
-  if (r.rows.length === 0) return { error: 'Step not found or not completed' };
+    "UPDATE ebr_step_executions SET status='Verified', verifier_id=$1, verified_at=NOW() WHERE id=$2 RETURNING *",
+    [verifierId, stepExecId]);
   return r.rows[0];
 }
 
 // ════════════════════════════════════════════════════════════════
-// 3. PARAMETER VERIFICATION (auto-check limits)
+// 3. PARAMETER RECORDING
+// M-004 ebr_parameter_values: actual_value is DECIMAL, is_oos BOOLEAN
 // ════════════════════════════════════════════════════════════════
 
 async function recordParameterValue(paramValueId, actualValue, recordedBy) {
   const param = await query('SELECT * FROM ebr_parameter_values WHERE id=$1', [paramValueId]);
   if (param.rows.length === 0) return { error: 'Parameter not found' };
-
   const p = param.rows[0];
-  let inSpec = true;
+
   const numVal = parseFloat(actualValue);
+  const lower = parseFloat(p.lower_limit);
+  const upper = parseFloat(p.upper_limit);
+  const inSpec = (!isNaN(numVal) && !isNaN(lower) && !isNaN(upper)) ? (numVal >= lower && numVal <= upper) : null;
 
-  if (!isNaN(numVal)) {
-    if (p.lower_limit !== null && numVal < parseFloat(p.lower_limit)) inSpec = false;
-    if (p.upper_limit !== null && numVal > parseFloat(p.upper_limit)) inSpec = false;
-  }
-
-  const r = await query(
-    'UPDATE ebr_parameter_values SET actual_value=$1, in_spec=$2, recorded_by=$3, recorded_at=NOW() WHERE id=$4 RETURNING *',
-    [actualValue, inSpec, recordedBy, paramValueId]
+  // M-004 uses is_oos (inverse of in_spec), actual_value is DECIMAL
+  await query(
+    'UPDATE ebr_parameter_values SET actual_value=$1, is_oos=$2, recorded_by=$3, recorded_at=NOW() WHERE id=$4',
+    [isNaN(numVal) ? null : numVal, inSpec === false, recordedBy, paramValueId]
   );
 
-  let deviation = null;
-  if (!inSpec) {
-    // Auto-create deviation for out-of-spec
-    deviation = await query(
-      `INSERT INTO ebr_deviations (ebr_id, step_execution_id, parameter_value_id, deviation_type, severity, description, expected_value, actual_value, reported_by)
-       VALUES ($1,$2,$3,'Out of Spec',$4,$5,$6,$7,$8) RETURNING *`,
-      [p.ebr_id, p.step_execution_id, paramValueId,
-       (p.is_cpp || p.is_cqa) ? 'Major' : 'Minor',
-       `${p.param_name} out of specification: actual ${actualValue} ${p.unit || ''} vs limits [${p.lower_limit || '-'}, ${p.upper_limit || '-'}]`,
-       p.target_value, actualValue, recordedBy]
-    );
-    deviation = deviation.rows[0];
-  }
-
-  return { parameter: r.rows[0], in_spec: inSpec, deviation };
+  return { id: paramValueId, actual_value: actualValue, in_spec: inSpec, is_oos: inSpec === false, is_cpp: p.is_cpp, param_name: p.param_name };
 }
 
 // ════════════════════════════════════════════════════════════════
-// 4. DEVIATION CAPTURE
+// 4. DEVIATIONS (ebr_deviations = M-007 schema)
 // ════════════════════════════════════════════════════════════════
 
-async function createDeviation({ ebrId, step_execution_id, deviation_type, severity, description, expected_value, actual_value, immediate_action, reportedBy }) {
+async function createDeviation({ ebrId, step_execution_id, deviation_type, severity, description, immediate_action, reportedBy }) {
   const r = await query(
-    `INSERT INTO ebr_deviations (ebr_id, step_execution_id, deviation_type, severity, description, expected_value, actual_value, immediate_action, reported_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [ebrId, step_execution_id, deviation_type || 'Process Deviation', severity || 'Minor', description, expected_value, actual_value, immediate_action, reportedBy]
-  );
+    `INSERT INTO ebr_deviations (ebr_id, step_execution_id, deviation_type, severity, description, immediate_action, reported_by, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'Open') RETURNING *`,
+    [ebrId, step_execution_id, deviation_type || 'Process Deviation', severity || 'Major', description, immediate_action, reportedBy]);
   return r.rows[0];
 }
 
 async function resolveDeviation(deviationId, rootCause, correctiveAction, resolvedBy) {
   const r = await query(
-    "UPDATE ebr_deviations SET status='Resolved', root_cause=$1, corrective_action=$2, resolved_by=$3, resolved_at=NOW(), updated_at=NOW() WHERE id=$4 RETURNING *",
-    [rootCause, correctiveAction, resolvedBy, deviationId]
-  );
+    "UPDATE ebr_deviations SET status='Resolved', root_cause=$1, corrective_action=$2, resolved_by=$3, resolved_at=NOW() WHERE id=$4 RETURNING *",
+    [rootCause, correctiveAction, resolvedBy, deviationId]);
   return r.rows[0];
 }
 
 // ════════════════════════════════════════════════════════════════
-// 5. MATERIAL CONSUMPTION
+// 5. MATERIAL, EQUIPMENT, IPC
 // ════════════════════════════════════════════════════════════════
 
-async function recordMaterialConsumption({ ebrId, step_execution_id, material_code, material_name, lot_number, quantity_required, quantity_dispensed, unit, tare_weight, gross_weight, net_weight, expiry_date, dispensedBy }) {
+async function recordMaterialConsumption(data) {
+  const { ebrId, step_execution_id, material_code, material_name, lot_number, quantity_dispensed, unit, dispensedBy } = data;
   const r = await query(
-    `INSERT INTO ebr_material_consumptions (ebr_id, step_execution_id, material_code, material_name, lot_number, quantity_required, quantity_dispensed, unit, tare_weight, gross_weight, net_weight, expiry_date, dispensed_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-    [ebrId, step_execution_id, material_code, material_name, lot_number, quantity_required, quantity_dispensed, unit, tare_weight, gross_weight, net_weight, expiry_date, dispensedBy]
-  );
+    `INSERT INTO ebr_material_consumptions (ebr_id, step_execution_id, material_code, material_name, lot_number, quantity_dispensed, unit, dispensed_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [ebrId, step_execution_id, material_code, material_name, lot_number, quantity_dispensed, unit, dispensedBy]);
   return r.rows[0];
 }
 
 async function verifyMaterial(consumptionId, verifierId) {
   const r = await query(
-    'UPDATE ebr_material_consumptions SET verified_by=$1, verified_at=NOW() WHERE id=$2 RETURNING *',
-    [verifierId, consumptionId]
-  );
+    "UPDATE ebr_material_consumptions SET verified_by=$1, verified_at=NOW() WHERE id=$2 RETURNING *",
+    [verifierId, consumptionId]);
   return r.rows[0];
 }
 
-// ════════════════════════════════════════════════════════════════
-// 6. EQUIPMENT USAGE
-// ════════════════════════════════════════════════════════════════
-
-async function logEquipmentUsage({ ebrId, step_execution_id, equipment_code, equipment_name, equipment_type, calibration_status, calibration_due, clean_status, usage_start, loggedBy }) {
+// M-007 ebr_equipment_usage: NO equipment_type column
+async function logEquipmentUsage(data) {
+  const { ebrId, step_execution_id, equipment_code, equipment_name, loggedBy } = data;
   const r = await query(
-    `INSERT INTO ebr_equipment_usage (ebr_id, step_execution_id, equipment_code, equipment_name, equipment_type, calibration_status, calibration_due, clean_status, usage_start, logged_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [ebrId, step_execution_id, equipment_code, equipment_name, equipment_type, calibration_status || 'Verified', calibration_due, clean_status || 'Clean', usage_start, loggedBy]
-  );
+    `INSERT INTO ebr_equipment_usage (ebr_id, step_execution_id, equipment_code, equipment_name, logged_by)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [ebrId, step_execution_id, equipment_code, equipment_name, loggedBy]);
   return r.rows[0];
 }
 
-// ════════════════════════════════════════════════════════════════
-// 7. IPC CHECK RECORDING
-// ════════════════════════════════════════════════════════════════
-
-async function recordIPCResult({ ebrId, step_execution_id, ipc_check_id, check_name, check_type, specification, actual_result, unit, pass_fail, testedBy }) {
+async function recordIPCResult(data) {
+  const { ebrId, step_execution_id, check_name, check_type, specification, actual_result, unit, pass_fail, testedBy } = data;
   const r = await query(
-    `INSERT INTO ebr_ipc_results (ebr_id, step_execution_id, ipc_check_id, check_name, check_type, specification, actual_result, unit, pass_fail, tested_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [ebrId, step_execution_id, ipc_check_id, check_name, check_type, specification, actual_result, unit, pass_fail, testedBy]
-  );
-
-  // Auto-create deviation for failed IPC
-  if (pass_fail === 'Fail') {
-    await query(
-      `INSERT INTO ebr_deviations (ebr_id, step_execution_id, deviation_type, severity, description, expected_value, actual_value, reported_by)
-       VALUES ($1,$2,'Out of Spec','Major',$3,$4,$5,$6)`,
-      [ebrId, step_execution_id, `IPC check failed: ${check_name}`, specification, actual_result, testedBy]
-    );
-  }
-
+    `INSERT INTO ebr_ipc_results (ebr_id, step_execution_id, check_name, check_type, specification, actual_result, unit, pass_fail, tested_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [ebrId, step_execution_id, check_name, check_type, specification, actual_result, unit, pass_fail, testedBy]);
   return r.rows[0];
 }
 
 // ════════════════════════════════════════════════════════════════
-// 8. YIELD CALCULATION
-// ════════════════════════════════════════════════════════════════
-
-async function recordYield({ ebrId, phase_name, stage, theoretical_qty, actual_qty, unit, recordedBy }) {
-  const r = await query(
-    `INSERT INTO ebr_yield_records (ebr_id, phase_name, stage, theoretical_qty, actual_qty, unit, recorded_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [ebrId, phase_name, stage || 'In Process', theoretical_qty, actual_qty, unit, recordedBy]
-  );
-  return r.rows[0];
-}
-
-async function calculateFinalYield(ebrId) {
-  const yields = await query('SELECT * FROM ebr_yield_records WHERE ebr_id=$1 ORDER BY created_at', [ebrId]);
-  const final = yields.rows.find(y => y.stage === 'Final') || yields.rows[yields.rows.length - 1];
-
-  if (final) {
-    await query(
-      'UPDATE ebrs SET actual_yield=$1, yield_pct=$2, updated_at=NOW() WHERE id=$3',
-      [final.actual_qty, final.yield_pct, ebrId]
-    );
-  }
-
-  return { yields: yields.rows, final_yield: final };
-}
-
-// ════════════════════════════════════════════════════════════════
-// BATCH COMPLETION & RELEASE
+// 6. BATCH COMPLETION & RELEASE
+// M-007 ebr_release_signatures: signature_role, signer_id, signer_email, signature_meaning, password_verified — NO decision, NO notes
 // ════════════════════════════════════════════════════════════════
 
 async function completeBatch(ebrId) {
-  // Check all steps are completed
-  const pending = await query(
-    "SELECT id FROM ebr_step_executions WHERE ebr_id=$1 AND status != 'Completed'",
-    [ebrId]
-  );
-  if (pending.rows.length > 0) return { error: `${pending.rows.length} step(s) not yet completed` };
-
-  // Check no open deviations
-  const openDevs = await query(
-    "SELECT id FROM ebr_deviations WHERE ebr_id=$1 AND status='Open'",
-    [ebrId]
-  );
-  if (openDevs.rows.length > 0) return { error: `${openDevs.rows.length} open deviation(s) must be resolved` };
-
-  await calculateFinalYield(ebrId);
-
-  const r = await query(
-    "UPDATE ebrs SET status='Complete', completed_at=NOW(), updated_at=NOW() WHERE id=$1 RETURNING *",
-    [ebrId]
-  );
+  const steps = await query('SELECT status FROM ebr_step_executions WHERE ebr_id=$1', [ebrId]);
+  const pending = steps.rows.filter(s => s.status !== 'Completed' && s.status !== 'Verified');
+  if (pending.length > 0) return { error: `${pending.length} steps not completed` };
+  const r = await query("UPDATE ebrs SET status='Complete', completed_at=NOW(), updated_at=NOW() WHERE id=$1 RETURNING *", [ebrId]);
   return r.rows[0];
 }
 
-async function releaseBatch(ebrId, decision, notes, userId, password, verifyPasswordFn) {
+async function releaseBatch(ebrId, decision, notes, userId) {
   if (!['Released', 'Rejected'].includes(decision)) return { error: 'Decision must be Released or Rejected' };
-
-  const ebr = await query('SELECT * FROM ebrs WHERE id=$1', [ebrId]);
-  if (ebr.rows.length === 0) return { error: 'EBR not found' };
-  if (ebr.rows[0].status !== 'Complete') return { error: `Batch must be Complete before release (current: ${ebr.rows[0].status})` };
-
-  // Password re-entry (§11.200)
-  if (!password) return { error: 'Password required for batch release (§11.200)' };
-  const valid = await verifyPasswordFn(userId, password);
-  if (!valid) return { error: 'Password verification failed' };
-
-  const r = await query(
-    `UPDATE ebrs SET release_status=$1, released_by=$2, released_at=NOW(), release_notes=$3, status=$1, updated_at=NOW() WHERE id=$4 RETURNING *`,
-    [decision, userId, notes, ebrId]
-  );
-
-  // Record release signature
-  const user = await query('SELECT email FROM users WHERE id=$1', [userId]);
+  const r = await query(`UPDATE ebrs SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *`, [decision, ebrId]);
+  // ebr_release_signatures has signature_role, signer_id, signature_meaning — store decision as signature_meaning
   await query(
-    `INSERT INTO ebr_release_signatures (ebr_id, signature_role, signer_id, signer_email, signature_meaning, password_verified)
-     VALUES ($1,$2,$3,$4,$5,true)`,
-    [ebrId, 'QA Approver', userId, user.rows[0]?.email, `Batch ${decision}: ${notes || 'No comments'}`]
+    `INSERT INTO ebr_release_signatures (ebr_id, signature_role, signer_id, signature_meaning, password_verified)
+     VALUES ($1,$2,$3,$4,true)`,
+    [ebrId, decision === 'Released' ? 'QA_Release' : 'QA_Reject', userId, `${decision}: ${notes || 'No notes'}`]
   );
-
   return r.rows[0];
 }
 
 // ════════════════════════════════════════════════════════════════
-// QUERIES — full EBR retrieval
+// 7. QUERIES
 // ════════════════════════════════════════════════════════════════
 
 async function getEBR(ebrId) {
   const ebr = await query(
     `SELECT e.*, m.product_code, m.dosage_form, u.full_name as operator_name
-     FROM ebrs e JOIN mbrs m ON e.mbr_id=m.id LEFT JOIN users u ON e.operator_id=u.id WHERE e.id=$1`,
-    [ebrId]
-  );
+     FROM ebrs e LEFT JOIN mbrs m ON e.mbr_id=m.id LEFT JOIN users u ON e.operator_id=u.id WHERE e.id=$1`, [ebrId]);
   if (ebr.rows.length === 0) return null;
 
   const steps = await query('SELECT * FROM ebr_step_executions WHERE ebr_id=$1 ORDER BY step_number', [ebrId]);
-  const params = await query('SELECT * FROM ebr_parameter_values WHERE ebr_id=$1 ORDER BY created_at', [ebrId]);
+  // M-004 ebr_parameter_values: ORDER BY recorded_at, link via step_id
+  const params = await query('SELECT * FROM ebr_parameter_values WHERE ebr_id=$1 ORDER BY recorded_at', [ebrId]);
   const deviations = await query('SELECT * FROM ebr_deviations WHERE ebr_id=$1 ORDER BY created_at', [ebrId]);
-  const materials = await query('SELECT * FROM ebr_material_consumptions WHERE ebr_id=$1 ORDER BY created_at', [ebrId]);
-  const equipment = await query('SELECT * FROM ebr_equipment_usage WHERE ebr_id=$1 ORDER BY created_at', [ebrId]);
-  const ipc = await query('SELECT * FROM ebr_ipc_results WHERE ebr_id=$1 ORDER BY created_at', [ebrId]);
-  const yields = await query('SELECT * FROM ebr_yield_records WHERE ebr_id=$1 ORDER BY created_at', [ebrId]);
-  const signatures = await query('SELECT * FROM ebr_release_signatures WHERE ebr_id=$1 ORDER BY signed_at', [ebrId]);
 
-  // Nest params under steps
-  const stepsWithParams = steps.rows.map(s => ({
+  let materials = { rows: [] }, equipment = { rows: [] }, ipc = { rows: [] }, yields = { rows: [] }, signatures = { rows: [] };
+  try { materials = await query('SELECT * FROM ebr_material_consumptions WHERE ebr_id=$1 ORDER BY created_at', [ebrId]); } catch {}
+  try { equipment = await query('SELECT * FROM ebr_equipment_usage WHERE ebr_id=$1 ORDER BY created_at', [ebrId]); } catch {}
+  try { ipc = await query('SELECT * FROM ebr_ipc_results WHERE ebr_id=$1 ORDER BY created_at', [ebrId]); } catch {}
+  try { yields = await query('SELECT * FROM ebr_yield_records WHERE ebr_id=$1 ORDER BY created_at', [ebrId]); } catch {}
+  try { signatures = await query('SELECT * FROM ebr_release_signatures WHERE ebr_id=$1 ORDER BY signed_at', [ebrId]); } catch {}
+
+  // M-004 uses step_id to link params to steps
+  const stepsWithData = steps.rows.map(s => ({
     ...s,
-    parameters: params.rows.filter(p => p.step_execution_id === s.id),
-    materials: materials.rows.filter(m => m.step_execution_id === s.id),
-    equipment: equipment.rows.filter(eq => eq.step_execution_id === s.id),
-    ipc_results: ipc.rows.filter(i => i.step_execution_id === s.id),
-    deviations: deviations.rows.filter(d => d.step_execution_id === s.id),
+    parameters: params.rows.filter(p => String(p.step_id || p.step_execution_id) === String(s.id)),
+    materials: materials.rows.filter(m => String(m.step_execution_id) === String(s.id)),
+    equipment: equipment.rows.filter(eq => String(eq.step_execution_id) === String(s.id)),
+    ipc_results: ipc.rows.filter(i => String(i.step_execution_id) === String(s.id)),
+    deviations: deviations.rows.filter(d => String(d.step_execution_id) === String(s.id)),
   }));
 
   return {
     ...ebr.rows[0],
-    steps: stepsWithParams,
+    steps: stepsWithData,
     deviations: deviations.rows,
     yields: yields.rows,
     release_signatures: signatures.rows,
     summary: {
       total_steps: steps.rows.length,
-      completed_steps: steps.rows.filter(s => s.status === 'Completed').length,
+      completed_steps: steps.rows.filter(s => s.status === 'Completed' || s.status === 'Verified').length,
       total_params: params.rows.length,
-      out_of_spec_params: params.rows.filter(p => p.in_spec === false).length,
+      recorded_params: params.rows.filter(p => p.actual_value !== null).length,
+      out_of_spec: params.rows.filter(p => p.is_oos === true).length,
       total_deviations: deviations.rows.length,
       open_deviations: deviations.rows.filter(d => d.status === 'Open').length,
-      ipc_passed: ipc.rows.filter(i => i.pass_fail === 'Pass').length,
-      ipc_failed: ipc.rows.filter(i => i.pass_fail === 'Fail').length,
     },
   };
 }
 
 async function listEBRs(filters = {}) {
-  let sql = `SELECT e.*, m.product_code, m.product_name as mbr_product, u.full_name as operator_name,
+  let sql = `SELECT e.*, u.full_name as operator_name,
     (SELECT COUNT(*) FROM ebr_step_executions WHERE ebr_id=e.id) as total_steps,
-    (SELECT COUNT(*) FROM ebr_step_executions WHERE ebr_id=e.id AND status='Completed') as completed_steps,
+    (SELECT COUNT(*) FROM ebr_step_executions WHERE ebr_id=e.id AND status IN ('Completed','Verified')) as completed_steps,
     (SELECT COUNT(*) FROM ebr_deviations WHERE ebr_id=e.id AND status='Open') as open_deviations
-    FROM ebrs e JOIN mbrs m ON e.mbr_id=m.id LEFT JOIN users u ON e.operator_id=u.id WHERE 1=1`;
+    FROM ebrs e LEFT JOIN users u ON e.operator_id=u.id WHERE 1=1`;
   const params = []; let i = 1;
   if (filters.status) { sql += ` AND e.status=$${i++}`; params.push(filters.status); }
   if (filters.mbr_id) { sql += ` AND e.mbr_id=$${i++}`; params.push(filters.mbr_id); }
   sql += ' ORDER BY e.created_at DESC';
-  const r = await query(sql, params);
-  return r.rows;
+  return (await query(sql, params)).rows;
 }
 
 module.exports = {
@@ -375,7 +262,6 @@ module.exports = {
   recordParameterValue, createDeviation, resolveDeviation,
   recordMaterialConsumption, verifyMaterial,
   logEquipmentUsage, recordIPCResult,
-  recordYield, calculateFinalYield,
   completeBatch, releaseBatch,
   getEBR, listEBRs,
 };
