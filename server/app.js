@@ -79,6 +79,19 @@ app.locals.validate = validate;
 app.post('/api/auth/login', loginValidation);
 app.post('/api/auth/register', registerValidation);
 
+// Root — system info
+app.get('/', function(req, res) {
+  res.json({
+    system: 'PharmaMES.AI',
+    description: 'Pharmaceutical Manufacturing Execution System',
+    compliance: ['21 CFR Part 11', 'GAMP5 Cat.5', 'ISA-88', 'ISA-95', 'ICH Q10'],
+    version: '1.0.0',
+    api: '/api',
+    health: '/api/health',
+    docs: 'https://github.com/JaisukhBK/pharma-mbr',
+  });
+});
+
 // Health check — no auth required, must be before authenticated routes
 app.get('/api/health', async function(req, res) {
   var c = await getAuditCount().catch(function() { return '?'; });
