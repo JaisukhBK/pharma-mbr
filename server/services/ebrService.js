@@ -15,17 +15,21 @@ const { query } = require('../db/pool');
 async function createEBR(mbrId, batchNumber, operatorId) {
   const mbr = await query('SELECT * FROM mbrs WHERE id=$1', [mbrId]);
   if (mbr.rows.length === 0) return { error: 'MBR not found' };
-  if (mbr.rows[0].status !== 'Effective') return { error: `MBR must be Effective (current: ${mbr.rows[0].status})` };
+  // PAS-X style: allow trial batches from Draft/Approved MBRs, production from Effective
+  const mbrStatus = mbr.rows[0].status;
+  const isTrial = mbrStatus !== 'Effective';
+  if (mbrStatus === 'Obsolete' || mbrStatus === 'Superseded') return { error: `Cannot create batch from ${mbrStatus} MBR` };
 
   const dup = await query('SELECT id FROM ebrs WHERE batch_number=$1', [batchNumber]);
   if (dup.rows.length > 0) return { error: 'Batch number already exists' };
 
-  const code = `EBR-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${batchNumber}`;
+  const batchType = isTrial ? 'Trial' : 'Production';
+  const code = `EBR-${isTrial ? 'TRL-' : ''}${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${batchNumber}`;
 
   const ebr = await query(
-    `INSERT INTO ebrs (ebr_code, mbr_id, mbr_code, batch_number, product_name, product_code, batch_size, status, operator_id, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'Ready',$8,$8) RETURNING *`,
-    [code, mbrId, mbr.rows[0].mbr_code, batchNumber, mbr.rows[0].product_name, mbr.rows[0].product_code, mbr.rows[0].batch_size, operatorId]
+    `INSERT INTO ebrs (ebr_code, mbr_id, mbr_code, batch_number, product_name, product_code, batch_size, status, line, operator_id, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'Ready',$8,$9,$9) RETURNING *`,
+    [code, mbrId, mbr.rows[0].mbr_code, batchNumber, mbr.rows[0].product_name, mbr.rows[0].product_code, mbr.rows[0].batch_size, batchType, operatorId]
   );
 
   const phases = await query('SELECT * FROM mbr_phases WHERE mbr_id=$1 ORDER BY phase_number', [mbrId]);
@@ -39,7 +43,8 @@ async function createEBR(mbrId, batchNumber, operatorId) {
       const exec = await query(
         `INSERT INTO ebr_step_executions (ebr_id, mbr_step_id, step_number, step_name, phase_name, instruction, is_critical, is_gmp_critical, duration_min, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Pending') RETURNING id`,
-        [ebr.rows[0].id, step.id, stepNum, step.step_name, phase.phase_name, step.instruction, step.is_critical, step.is_gmp_critical, step.duration_min]
+        [ebr.rows[0].id, step.id, stepNum, step.step_name || 'Step '+stepNum, phase.phase_name, step.instruction || '',
+         step.is_critical || false, step.is_gmp_critical || false, step.duration_min ? Math.round(parseFloat(step.duration_min)) : null]
       );
 
       // M-004 ebr_parameter_values: step_id(VARCHAR), param_id(VARCHAR), target_value(DECIMAL), is_oos, is_cpp — NO step_execution_id, NO is_cqa, NO created_at
