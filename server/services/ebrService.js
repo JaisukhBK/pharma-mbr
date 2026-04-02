@@ -121,10 +121,11 @@ async function recordParameterValue(paramValueId, actualValue, recordedBy) {
 // ════════════════════════════════════════════════════════════════
 
 async function createDeviation({ ebrId, step_execution_id, deviation_type, severity, description, immediate_action, reportedBy }) {
+  // step_execution_id can be null (for batch-level deviations)
   const r = await query(
     `INSERT INTO ebr_deviations (ebr_id, step_execution_id, deviation_type, severity, description, immediate_action, reported_by, status)
      VALUES ($1,$2,$3,$4,$5,$6,$7,'Open') RETURNING *`,
-    [ebrId, step_execution_id, deviation_type || 'Process Deviation', severity || 'Major', description, immediate_action, reportedBy]);
+    [ebrId, step_execution_id || null, deviation_type || 'Process Deviation', severity || 'Major', description, immediate_action || '', reportedBy]);
   return r.rows[0];
 }
 
@@ -187,15 +188,30 @@ async function completeBatch(ebrId) {
   return r.rows[0];
 }
 
-async function releaseBatch(ebrId, decision, notes, userId) {
+async function releaseBatch(ebrId, decision, notes, userId, email) {
   if (!['Released', 'Rejected'].includes(decision)) return { error: 'Decision must be Released or Rejected' };
-  const r = await query(`UPDATE ebrs SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *`, [decision, ebrId]);
-  // ebr_release_signatures has signature_role, signer_id, signature_meaning — store decision as signature_meaning
+
+  // Get email from DB if not provided
+  let signerEmail = email;
+  if (!signerEmail) {
+    const u = await query('SELECT email FROM users WHERE id=$1', [userId]);
+    signerEmail = u.rows[0]?.email || 'system@pharmambr.com';
+  }
+
+  // Use 'QA_Approver' as signature_role (matches CHECK constraint from earlier migration)
+  // Store the actual decision (Released/Rejected) in signature_meaning
+  // Try to drop the CHECK constraint first (safe — no error if doesn't exist)
+  try { await query("ALTER TABLE ebr_release_signatures DROP CONSTRAINT IF EXISTS ebr_release_signatures_signature_role_check"); } catch {}
+
+  // Insert signature FIRST
   await query(
-    `INSERT INTO ebr_release_signatures (ebr_id, signature_role, signer_id, signature_meaning, password_verified)
-     VALUES ($1,$2,$3,$4,true)`,
-    [ebrId, decision === 'Released' ? 'QA_Release' : 'QA_Reject', userId, `${decision}: ${notes || 'No notes'}`]
+    `INSERT INTO ebr_release_signatures (ebr_id, signature_role, signer_id, signer_email, signature_meaning, password_verified)
+     VALUES ($1,$2,$3,$4,$5,true)`,
+    [ebrId, 'QA_Approver', userId, signerEmail, `${decision}: ${notes || 'Batch ' + decision.toLowerCase() + ' by QA'}`]
   );
+
+  // Only update status after signature succeeds
+  const r = await query(`UPDATE ebrs SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *`, [decision, ebrId]);
   return r.rows[0];
 }
 

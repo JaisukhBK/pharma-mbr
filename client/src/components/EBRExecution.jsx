@@ -135,7 +135,7 @@ function CreateForm({ t, onCreated, onCancel }) {
   };
 
   return (
-    <Card t={t} style={{ marginBottom:16, borderLeft:'3px solid '+(trial?'#f5a623':t.accent) }}>
+    <Card t={t} style={{ marginBottom:16, padding:18, borderLeft:'3px solid '+(trial?'#f5a623':t.accent) }}>
       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
         <span style={{ fontSize:13, fontWeight:700, color:t.text }}>Create Manufacturing Order</span>
         <span style={{ fontSize:10, color:t.textMuted }}>PAS-X one-click MO</span>

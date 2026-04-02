@@ -116,11 +116,11 @@ router.post('/:ebrId/deviations', async (req, res) => {
     const { step_execution_id, deviation_type, severity, description, immediate_action } = req.body;
     if (!description) return res.status(400).json({ error: 'description required' });
     const result = await createDeviation({
-      ebrId: req.params.ebrId, step_execution_id, deviation_type, severity, description, immediate_action, reportedBy: req.session.userId,
+      ebrId: req.params.ebrId, step_execution_id: step_execution_id || null, deviation_type, severity, description, immediate_action, reportedBy: req.session.userId,
     });
     await req.audit({ action: 'CREATE', resourceType: 'EBR_DEVIATION', resourceId: result.id, details: `Deviation: ${description.substring(0, 100)}` });
     res.status(201).json(result);
-  } catch (err) { console.error('[EBR] Deviation:', err.message); res.status(500).json({ error: 'Failed' }); }
+  } catch (err) { console.error('[EBR] Deviation:', err.message, err.stack?.split('\n')[0]); res.status(500).json({ error: err.message || 'Failed to create deviation' }); }
 });
 
 router.put('/deviations/:devId/resolve', async (req, res) => {
@@ -187,11 +187,11 @@ router.post('/:ebrId/release', authorize('mbr:approve'), async (req, res) => {
   try {
     const { decision, notes } = req.body;
     if (!decision) return res.status(400).json({ error: 'decision required (Released or Rejected)' });
-    const result = await releaseBatch(req.params.ebrId, decision, notes, req.session.userId);
+    const result = await releaseBatch(req.params.ebrId, decision, notes, req.session.userId, req.session.email);
     if (result.error) return res.status(400).json(result);
     await req.audit({ action: 'APPROVE', resourceType: 'EBR', resourceId: req.params.ebrId, details: `Batch ${decision}: ${result.batch_number}` });
     res.json(result);
-  } catch (err) { console.error('[EBR] Release:', err.message); res.status(500).json({ error: 'Failed' }); }
+  } catch (err) { console.error('[EBR] Release:', err.message); res.status(500).json({ error: err.message || 'Failed to release' }); }
 });
 
 module.exports = router;
