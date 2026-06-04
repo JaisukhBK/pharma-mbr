@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/jaisukh/OneDrive/Desktop/Sem2_DMML_Week2/week11/**)",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\('flightsdata.xlsx'\\); print\\(df.columns.tolist\\(\\)\\); print\\(df.shape\\); print\\(df.head\\(3\\)\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\('flightsdata.xlsx'\\); print\\(df.columns.tolist\\(\\)\\); print\\(df.shape\\); print\\(df.dtypes\\)\")"
+    ]
+  }
+}
