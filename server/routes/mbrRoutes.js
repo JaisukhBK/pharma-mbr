@@ -25,8 +25,10 @@ router.use(requireTrainingComplete());
 const editLock = requireEditable();
 
 // Multer config for attachments + XML import
+const uploadsDir = process.env.VERCEL ? '/tmp' : path.join(__dirname, '..', 'uploads');
+try { if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) { console.warn('[UPLOAD] mkdir:', e.message); }
 const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', 'uploads'),
+  destination: uploadsDir,
   filename: (req, file, cb) => cb(null, `doc-${Date.now()}-${file.originalname}`),
 });
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
