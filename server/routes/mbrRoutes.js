@@ -385,6 +385,88 @@ router.get('/:mbrId/transitions', authorize('audit:read'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed' }); }
 });
 
+// ═══ STATUS TRANSITION — QA-controlled actions (Effective→Ineffective, etc.) ═══
+// 21 CFR Part 11 §11.10(f) — requires e-signature, CC number, reason, QA role
+const QA_GROUPS = ['QA', 'QA_Approver', 'Quality Assurance', 'qa', 'admin'];
+const VALID_TRANSITIONS = {
+  'Effective':   ['Ineffective', 'Superseded', 'Obsolete'],
+  'Ineffective': ['Obsolete'],
+  'Approved':    ['Obsolete'],
+};
+
+router.post('/:mbrId/transition', authorize('mbr:sign'), async (req, res) => {
+  try {
+    const { to_status, reason, cc_number, signature_meaning } = req.body;
+
+    // Validate required fields
+    if (!to_status) return res.status(400).json({ error: 'to_status is required' });
+    if (!reason || !reason.trim()) return res.status(400).json({ error: 'Reason is required (21 CFR Part 11)' });
+
+    // Get current MBR
+    const mbrR = await query('SELECT * FROM mbrs WHERE id=$1', [req.params.mbrId]);
+    if (mbrR.rows.length === 0) return res.status(404).json({ error: 'MBR not found' });
+    const mbr = mbrR.rows[0];
+    const fromStatus = mbr.status;
+
+    // Validate transition is allowed
+    const allowed = VALID_TRANSITIONS[fromStatus] || [];
+    if (!allowed.includes(to_status)) {
+      return res.status(400).json({ error: `Transition ${fromStatus} → ${to_status} is not permitted` });
+    }
+
+    // QA role gate for Ineffective transition
+    if (to_status === 'Ineffective') {
+      const userRole = req.session.groupId || req.session.role || '';
+      if (!QA_GROUPS.includes(userRole)) {
+        await req.audit({ action: 'TRANSITION', resourceType: 'MBR', resourceId: req.params.mbrId, details: `BLOCKED: ${fromStatus}→${to_status} by non-QA user (${userRole})` });
+        return res.status(403).json({ error: 'Only QA personnel can mark an MBR as Ineffective' });
+      }
+      if (!cc_number || !cc_number.trim()) {
+        return res.status(400).json({ error: 'Change Control (CC) number is required for Ineffective transition' });
+      }
+    }
+
+    // Apply transition
+    await query(
+      'UPDATE mbrs SET status=$1, updated_at=NOW() WHERE id=$2',
+      [to_status, req.params.mbrId]
+    );
+
+    // Sync to master_batch_records if it exists
+    await query('UPDATE master_batch_records SET status=$1 WHERE id=$2', [to_status, req.params.mbrId]).catch(() => {});
+
+    // Log transition with CC number in reason
+    const fullReason = cc_number
+      ? `[CC: ${cc_number.trim()}] ${reason.trim()}`
+      : reason.trim();
+
+    await logTransition(
+      req.params.mbrId, fromStatus, to_status,
+      'QA_Transition', req.session.userId, fullReason
+    );
+
+    // Audit trail
+    await req.audit({
+      action: 'TRANSITION',
+      resourceType: 'MBR',
+      resourceId: req.params.mbrId,
+      details: `Status: ${fromStatus} → ${to_status} | CC: ${cc_number || 'N/A'} | Reason: ${reason.trim()} | By: ${req.session.fullName}`,
+    });
+
+    res.json({
+      status: to_status,
+      from_status: fromStatus,
+      cc_number: cc_number || null,
+      reason: reason.trim(),
+      transitioned_by: req.session.fullName,
+      transitioned_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[MBR] Transition:', err);
+    res.status(500).json({ error: 'Status transition failed: ' + err.message });
+  }
+});
+
 // ═══ VERSIONING ═══
 router.post('/:mbrId/new-version', authorize('mbr:write'), async (req, res) => {
   try {

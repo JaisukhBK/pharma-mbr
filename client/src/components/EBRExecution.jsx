@@ -6,6 +6,10 @@ import {
   ClipboardList, Play, CheckCircle, AlertTriangle, Loader2, ChevronDown, ChevronUp,
   Plus, ArrowLeft, Shield, Activity, Lock, X, XCircle, FileText, Eye
 } from 'lucide-react';
+import {
+  Badge, Card, Label, Btn, SumCard, ProgressBar, Center, ErrBox, inputStyle,
+  EBR_STATUS_COLORS,
+} from './ui/PharmUI';
 
 const API = import.meta.env.VITE_API_URL || '';
 const token = () => localStorage.getItem('pharma_mbr_token');
@@ -17,7 +21,7 @@ const api = async (url, opts = {}) => {
   return d;
 };
 
-const SC = { Ready:'#2dceef', 'In Progress':'#f5a623', Complete:'#00e5a0', Released:'#00e5a0', Rejected:'#f5365c', Pending:'#7a8ba8', Completed:'#00e5a0', Verified:'#5046e5' };
+const SC = EBR_STATUS_COLORS;
 
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN EXPORT — EBR LIST + EXECUTION ROUTER
@@ -56,7 +60,7 @@ export default function EBRExecution({ t, user }) {
           <div style={{ fontSize:20, fontWeight:800, color:t.text }}>EBR Execution</div>
           <div style={{ fontSize:12, color:t.textMuted }}>Shop floor electronic batch record execution engine</div>
         </div>
-        <Btn t={t} onClick={() => setShowCreate(true)} accent><Plus size={14}/>New Batch</Btn>
+        <Btn t={t} onClick={() => setShowCreate(true)} variant="accent"><Plus size={14}/>New Batch</Btn>
       </div>
 
       {showCreate && <CreateForm t={t} onCreated={ebr => { setShowCreate(false); loadList(); openEbr(ebr.id); }} onCancel={() => setShowCreate(false)} />}
@@ -153,8 +157,8 @@ function CreateForm({ t, onCreated, onCancel }) {
           <input value={bn} onChange={e => { setBn(e.target.value); setErr(''); }} placeholder="BN-2026-001" onKeyDown={e => e.key==='Enter'&&ok&&go()}
             style={{ ...inputStyle(t), width:'100%', boxSizing:'border-box' }}/>
         </div>
-        <Btn t={t} onClick={go} disabled={busy||!ok} accent={!trial} warn={trial}>{busy?'Creating...':trial?'Start Trial Batch':'Start Production Batch'}</Btn>
-        <Btn t={t} onClick={onCancel} ghost>Cancel</Btn>
+        <Btn t={t} onClick={go} disabled={busy||!ok} variant={trial ? 'warn' : 'accent'}>{busy?'Creating...':trial?'Start Trial Batch':'Start Production Batch'}</Btn>
+        <Btn t={t} onClick={onCancel} variant="ghost">Cancel</Btn>
       </div>
       {trial && !err && <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:8, padding:'6px 10px', background:'#f5a62310', border:'1px solid #f5a62330', borderRadius:6 }}>
         <AlertTriangle size={12} color="#f5a623"/><span style={{ fontSize:11, color:'#f5a623', fontWeight:600 }}>Trial batch — MBR is {m?.status} (not yet Effective). For testing/validation only.</span>
@@ -333,11 +337,11 @@ function ExecutionView({ ebr, t, user, onBack, onRefresh }) {
         <div style={{ flex:1 }}/>
         {/* Batch-level actions based on status */}
         {ebr.status === 'In Progress' && sum.completed_steps === sum.total_steps && openDevs === 0 && (
-          <Btn t={t} onClick={completeBatch} disabled={busy} accent><CheckCircle size={13}/>Complete Batch</Btn>
+          <Btn t={t} onClick={completeBatch} disabled={busy} variant="accent"><CheckCircle size={13}/>Complete Batch</Btn>
         )}
         {ebr.status === 'Complete' && <>
-          <Btn t={t} onClick={() => releaseBatch('Released')} disabled={busy} accent><Shield size={13}/>Release (QA)</Btn>
-          <Btn t={t} onClick={() => releaseBatch('Rejected')} disabled={busy} danger><XCircle size={13}/>Reject</Btn>
+          <Btn t={t} onClick={() => releaseBatch('Released')} disabled={busy} variant="accent"><Shield size={13}/>Release (QA)</Btn>
+          <Btn t={t} onClick={() => releaseBatch('Rejected')} disabled={busy} variant="danger"><XCircle size={13}/>Reject</Btn>
         </>}
       </div>
 
@@ -402,19 +406,19 @@ function ExecutionView({ ebr, t, user, onBack, onRefresh }) {
                     <Badge color={ssc}>{step.status}</Badge>
 
                     {/* Sequential: only show Start if this is the next step */}
-                    {canStart && <Btn t={t} onClick={e => { e.stopPropagation(); startStep(step.id); }} disabled={busy} small accent><Play size={10}/>Start</Btn>}
+                    {canStart && <Btn t={t} onClick={e => { e.stopPropagation(); startStep(step.id); }} disabled={busy} size="sm" variant="accent"><Play size={10}/>Start</Btn>}
 
                     {/* Complete: gated by params + OOS handling */}
                     {step.status === 'In Progress' && !isLocked && (
                       <Btn t={t} onClick={e => { e.stopPropagation(); completeStep(step); }} disabled={busy || !canComplete}
-                        small accent={canComplete && oosCount===0} warn={canComplete && oosCount>0} ghost={!canComplete}>
+                        size="sm" variant={!canComplete ? 'ghost' : oosCount > 0 ? 'warn' : 'accent'}>
                         <CheckCircle size={10}/>
                         {unrecorded.length > 0 ? `${unrecorded.length} params left` : oosCount > 0 ? `Complete (${oosCount} OOS)` : 'Complete'}
                       </Btn>
                     )}
 
                     {/* Verify: second-person for critical steps */}
-                    {needsVerify && <Btn t={t} onClick={e => { e.stopPropagation(); verifyStep(step.id); }} disabled={busy} small><Eye size={10}/>Verify</Btn>}
+                    {needsVerify && <Btn t={t} onClick={e => { e.stopPropagation(); verifyStep(step.id); }} disabled={busy} size="sm"><Eye size={10}/>Verify</Btn>}
 
                     {done && <Lock size={11} color={t.textMuted}/>}
                     {isExp ? <ChevronUp size={14} color={t.textMuted}/> : <ChevronDown size={14} color={t.textMuted}/>}
@@ -489,8 +493,8 @@ function ExecutionView({ ebr, t, user, onBack, onRefresh }) {
             style={{ ...inputStyle(t), width:'100%', boxSizing:'border-box', marginBottom:12 }}/>
           {signErr && <ErrBox>{signErr}</ErrBox>}
           <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:8 }}>
-            <Btn t={t} ghost onClick={() => { setSignModal(null); setSignPw(''); setSignErr(''); }}>Cancel</Btn>
-            <Btn t={t} accent onClick={signModal.action==='release' ? handleReleaseConfirm : handleSignConfirm} disabled={busy || !signPw}>
+            <Btn t={t} variant="ghost" onClick={() => { setSignModal(null); setSignPw(''); setSignErr(''); }}>Cancel</Btn>
+            <Btn t={t} variant="accent" onClick={signModal.action==='release' ? handleReleaseConfirm : handleSignConfirm} disabled={busy || !signPw}>
               <Shield size={13}/>{busy ? 'Verifying...' : 'Apply Signature'}
             </Btn>
           </div>
@@ -532,44 +536,6 @@ function ParamRow({ p, t, onRecord, locked }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SHARED UI COMPONENTS
+// SHARED UI COMPONENTS — imported from ./ui/PharmUI.jsx
+// Badge, Card, Label, Btn, SumCard, ProgressBar, Center, ErrBox, inputStyle
 // ════════════════════════════════════════════════════════════════════════════
-
-function Card({ t, children, style={} }) {
-  return <div style={{ background:t.card, border:'1px solid '+t.cardBorder, borderRadius:10, ...style }}>{children}</div>;
-}
-function Badge({ color, children, tiny }) {
-  return <span style={{ fontSize:tiny?8:10, fontWeight:700, padding:tiny?'1px 4px':'2px 8px', borderRadius:tiny?3:5, background:color+'15', color, whiteSpace:'nowrap' }}>{children}</span>;
-}
-function Label({ t, children }) {
-  return <div style={{ fontSize:9, fontWeight:600, color:t.textDim, textTransform:'uppercase', marginBottom:3, letterSpacing:0.5 }}>{children}</div>;
-}
-function Btn({ t, children, onClick, disabled, small, accent, warn, danger, ghost, style={} }) {
-  const bg = accent ? t.accent : warn ? '#f5a623' : danger ? '#f5365c' : ghost ? 'transparent' : t.bgAlt;
-  const clr = ghost ? t.textDim : (accent||warn||danger) ? '#fff' : t.text;
-  const brd = ghost ? '1px solid '+t.cardBorder : 'none';
-  return <button onClick={onClick} disabled={disabled} style={{ display:'flex', alignItems:'center', gap:5, padding:small?'4px 10px':'9px 16px', borderRadius:small?6:8, border:brd, background:bg, color:clr, fontSize:small?10:12, fontWeight:700, cursor:disabled?'not-allowed':'pointer', opacity:disabled?0.5:1, whiteSpace:'nowrap', ...style }}>{children}</button>;
-}
-function SumCard({ label, val, sub, color, t }) {
-  return <Card t={t} style={{ padding:'12px 16px' }}>
-    <Label t={t}>{label}</Label>
-    <div style={{ fontSize:20, fontWeight:800, color, fontFamily:"'DM Mono',monospace" }}>{val}</div>
-    <div style={{ fontSize:10, color:t.textDim, marginTop:2 }}>{sub}</div>
-  </Card>;
-}
-function ProgressBar({ pct, color, width=80, height=6 }) {
-  return <div style={{ width, height, background:'#e2e6ea', borderRadius:height/2, overflow:'hidden' }}>
-    <div style={{ width:pct+'%', height:'100%', background:color, borderRadius:height/2, transition:'width 0.5s ease' }}/>
-  </div>;
-}
-function Center({ t, children }) {
-  return <div style={{ textAlign:'center', padding:50, color:t.textMuted }}>{children}</div>;
-}
-function ErrBox({ children }) {
-  return <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:8, padding:'6px 10px', background:'#f5365c10', border:'1px solid #f5365c30', borderRadius:6 }}>
-    <AlertTriangle size={12} color="#f5365c"/><span style={{ fontSize:11, color:'#f5365c' }}>{children}</span>
-  </div>;
-}
-function inputStyle(t) {
-  return { background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:8, padding:'9px 12px', fontSize:12, outline:'none' };
-}

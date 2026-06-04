@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS mbrs (
   batch_size_unit     VARCHAR(20) DEFAULT 'kg',
   description         TEXT,
   status              VARCHAR(30) DEFAULT 'Draft'
-                      CHECK (status IN ('Draft','In Review','Approved','Effective','Superseded','Obsolete')),
+                      CHECK (status IN ('Draft','In Review','Approved','Effective','Ineffective','Superseded','Obsolete')),
   current_version     INT DEFAULT 1,
   target_yield        NUMERIC(5,2),
   -- Feature 7: Batch Type + Feature 9: Mandatory Fields

@@ -36,14 +36,17 @@ function Sel({ label, value, onChange, t, options }) {
   </div>;
 }
 
-export default function CoDesignerPanel({ mbrId, t, disabled, cdService, featuresService, onMbrCreated }) {
-  const [mode, setMode] = useState('off');
+export default function CoDesignerPanel({ mbrId, t, disabled, cdService, featuresService, onMbrCreated, onMbrUpdate }) {
+  // Persist mode in sessionStorage so it survives page navigation
+  const [mode, setModeRaw] = useState(() => sessionStorage.getItem('codesigner_mode') || 'off');
+  const setMode = (m) => { setModeRaw(m); sessionStorage.setItem('codesigner_mode', m); };
   const [pipeStatus, setPipeStatus] = useState('idle');
   const [proposals, setProposals] = useState([]);
   const [metrics, setMetrics] = useState(null);
   const [uploadResult, setUploadResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [showPanel, setShowPanel] = useState(false);
+  const [showPanel, setShowPanelRaw] = useState(() => sessionStorage.getItem('codesigner_panel') === 'true');
+  const setShowPanel = (v) => { setShowPanelRaw(v); sessionStorage.setItem('codesigner_panel', v ? 'true' : 'false'); };
   const [activeTab, setActiveTab] = useState('proposals');
   const [showPwModal, setShowPwModal] = useState(false);
   const [pendingMode, setPendingMode] = useState(null);
@@ -61,8 +64,24 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
 
   useEffect(() => { setWorkingMbrId(mbrId); }, [mbrId]);
   useEffect(() => { if (workingMbrId && cdService) { fetchStatus(); loadAttachments(); } }, [workingMbrId]);
+  // Auto-fetch proposals when panel is shown or tab switches to proposals
+  useEffect(() => { if (showPanel && workingMbrId && cdService && mode !== 'off') { fetchProposals(); } }, [showPanel, workingMbrId, mode]);
+  useEffect(() => { if (activeTab === 'proposals' && workingMbrId && cdService && mode !== 'off') { fetchProposals(); } }, [activeTab]);
 
-  const fetchStatus = async (id) => { const mid = id || workingMbrId; if (!mid) return; try { const s = await cdService.getCoDesignerStatus(mid); setPipeStatus(s.status||'idle'); if (s.proposals) setMetrics(s.proposals); } catch {} };
+  const fetchStatus = async (id) => {
+    const mid = id || workingMbrId;
+    if (!mid) return;
+    try {
+      const s = await cdService.getCoDesignerStatus(mid);
+      setPipeStatus(s.status || 'idle');
+      if (s.proposals) setMetrics(s.proposals);
+      // Sync persisted mode with backend session
+      if (s.mode && s.mode !== 'off') {
+        setMode(s.mode);
+        setShowPanel(true);
+      }
+    } catch {}
+  };
   const fetchProposals = async (id) => { const mid = id || workingMbrId; if (!mid) return; try { const r = await cdService.listProposals(mid); const list = r.data||[]; setProposals(list); setMetrics({ total: list.length, pending: list.filter(p=>p.status==='pending').length, accepted: list.filter(p=>p.status==='accepted').length, rejected: list.filter(p=>p.status==='rejected').length }); } catch {} };
   const loadAttachments = async (id) => { const mid = id || workingMbrId; if (!mid || !featuresService) return; try { const r = await featuresService.listAttachments(mid); setAttachments(r.data||[]); } catch {} };
 
@@ -152,47 +171,191 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
   };
 
   // Voice — AI Interactive
+  const voiceActiveRef = useRef(false);
+  const [voiceStatus, setVoiceStatus] = useState(''); // 'starting', 'listening', 'processing', ''
+
   const toggleVoice = () => {
-    if (voiceActive) { voiceRef.current?.stop(); setVoiceActive(false); return; }
+    if (voiceActive) {
+      voiceActiveRef.current = false;
+      try { voiceRef.current?.abort(); } catch {}
+      try { voiceRef.current?.stop(); } catch {}
+      voiceRef.current = null;
+      setVoiceActive(false);
+      setVoiceText('');
+      setVoiceStatus('');
+      return;
+    }
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) { setError('Speech recognition not supported'); return; }
+    if (!SpeechRecognition) { setError('Speech recognition not supported. Use Chrome or Edge.'); return; }
+
+    voiceActiveRef.current = true;
+    setVoiceActive(true);
+    setVoiceText('');
+    setVoiceStatus('starting');
+
     const rec = new SpeechRecognition();
-    rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+    rec.maxAlternatives = 1;
+
+    rec.onstart = () => {
+      console.log('[VOICE] Recognition started');
+      setVoiceStatus('listening');
+    };
+
+    rec.onaudiostart = () => {
+      console.log('[VOICE] Audio capture started');
+    };
+
+    rec.onspeechstart = () => {
+      console.log('[VOICE] Speech detected');
+      setVoiceStatus('processing');
+    };
+
     rec.onresult = (ev) => {
       let text = ''; let isFinal = false;
-      for (let i = ev.resultIndex; i < ev.results.length; i++) { text += ev.results[i][0].transcript; if (ev.results[i].isFinal) isFinal = true; }
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        text += ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) isFinal = true;
+      }
+      console.log('[VOICE] Result:', text, 'final:', isFinal);
       setVoiceText(text);
       if (isFinal) {
         setVoiceHistory(h => [...h, { role:'user', text, time:new Date().toLocaleTimeString() }]);
-        // Send to AI as a design command
         sendVoiceCommand(text);
+        setVoiceText('');
+        setVoiceStatus('listening');
       }
     };
-    rec.onerror = (ev) => { console.error('[VOICE]', ev.error); setVoiceActive(false); };
-    rec.start(); voiceRef.current = rec; setVoiceActive(true); setVoiceText('');
+
+    rec.onerror = (ev) => {
+      console.error('[VOICE] Error:', ev.error);
+      if (['not-allowed', 'service-not-allowed'].includes(ev.error)) {
+        voiceActiveRef.current = false;
+        setVoiceActive(false);
+        setVoiceStatus('');
+        setError('Microphone access denied. Allow mic in browser settings and try again.');
+      }
+      // 'no-speech', 'aborted', 'network' — let onend handle restart
+    };
+
+    rec.onend = () => {
+      console.log('[VOICE] Recognition ended. Should restart:', voiceActiveRef.current);
+      if (voiceActiveRef.current) {
+        setVoiceStatus('starting');
+        setTimeout(() => {
+          if (!voiceActiveRef.current) return;
+          try {
+            const newRec = new SpeechRecognition();
+            newRec.continuous = true;
+            newRec.interimResults = true;
+            newRec.lang = 'en-US';
+            newRec.maxAlternatives = 1;
+            newRec.onstart = rec.onstart;
+            newRec.onaudiostart = rec.onaudiostart;
+            newRec.onspeechstart = rec.onspeechstart;
+            newRec.onresult = rec.onresult;
+            newRec.onerror = rec.onerror;
+            newRec.onend = rec.onend;
+            newRec.start();
+            voiceRef.current = newRec;
+            console.log('[VOICE] Restarted');
+          } catch (e) {
+            console.error('[VOICE] Restart failed:', e);
+            setVoiceStatus('');
+          }
+        }, 500);
+      } else {
+        setVoiceStatus('');
+      }
+    };
+
+    try {
+      rec.start();
+      voiceRef.current = rec;
+      console.log('[VOICE] Initial start');
+    } catch (e) {
+      console.error('[VOICE] Start failed:', e);
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      setVoiceStatus('');
+      setError('Failed to start voice: ' + e.message);
+    }
   };
 
   const sendVoiceCommand = async (text) => {
-    setVoiceHistory(h => [...h, { role:'ai', text:'Processing: "'+text+'"...', time:new Date().toLocaleTimeString() }]);
-    // In a full implementation, this would call the Co-Designer agent with the voice text
-    // For now it logs the command and provides a placeholder response
-    setTimeout(() => {
-      setVoiceHistory(h => [...h, { role:'ai', text:`Understood. I'll incorporate "${text.substring(0,50)}" into the MBR design. Please review the proposals panel for updates.`, time:new Date().toLocaleTimeString() }]);
-    }, 1500);
+    if (!text.trim()) return;
+    const mid = workingMbrId;
+    if (!mid) { setError('No MBR selected — upload a PDF or open an MBR first.'); return; }
+    if (!cdService) { setError('Co-Designer service not available'); return; }
+
+    // Add placeholder AI message that will be progressively filled
+    const aiMsgId = Date.now();
+    setVoiceHistory(h => [...h, { id: aiMsgId, role:'ai', text:'', time:new Date().toLocaleTimeString(), loading:true, streaming:true }]);
+
+    // Build conversation history for multi-turn context
+    const history = voiceHistory
+      .filter(m => !m.loading && !m.streaming)
+      .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+
+    try {
+      await cdService.chatStream(mid, text, history,
+        // onChunk — append text progressively
+        (chunk) => {
+          setVoiceHistory(h => h.map(m =>
+            m.id === aiMsgId ? { ...m, text: m.text + chunk, loading: false } : m
+          ));
+        },
+        // onDone — finalize with proposals
+        (result) => {
+          setVoiceHistory(h => h.map(m =>
+            m.id === aiMsgId ? { ...m, text: result.text, streaming: false, loading: false, proposals: result.proposals || [] } : m
+          ));
+          if (result.proposals_created > 0) { fetchProposals(); fetchStatus(); }
+        },
+        // onError — show error
+        (errMsg) => {
+          setVoiceHistory(h => h.map(m =>
+            m.id === aiMsgId ? { ...m, text: 'Error: ' + errMsg, streaming: false, loading: false, isError: true } : m
+          ));
+        }
+      );
+    } catch (e) {
+      setVoiceHistory(h => h.map(m =>
+        m.id === aiMsgId ? { ...m, text: 'Error: ' + e.message, streaming: false, loading: false, isError: true } : m
+      ));
+    }
+  };
+
+  // Validation
+  const [validating, setValidating] = useState(false);
+  const [validation, setValidation] = useState(null);
+
+  const runValidation = async () => {
+    if (!workingMbrId || !cdService) return;
+    setValidating(true); setValidation(null);
+    try {
+      const result = await cdService.validate(workingMbrId);
+      setValidation(result);
+      setActiveTab('proposals'); // show results in proposals tab
+    } catch (e) { setError('Validation failed: ' + e.message); }
+    finally { setValidating(false); }
   };
 
   const sendTextCommand = () => {
     if (!voiceCmd.trim()) return;
-    setVoiceHistory(h => [...h, { role:'user', text:voiceCmd, time:new Date().toLocaleTimeString() }]);
-    sendVoiceCommand(voiceCmd);
+    const msg = voiceCmd.trim();
+    setVoiceHistory(h => [...h, { role:'user', text:msg, time:new Date().toLocaleTimeString() }]);
     setVoiceCmd('');
+    sendVoiceCommand(msg);
   };
 
   // Reviews
-  const handleAccept = async (pid, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'accepted', notes); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
+  const handleAccept = async (pid, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'accepted', notes); fetchProposals(); fetchStatus(); if (onMbrUpdate) onMbrUpdate(); } catch(e) { setError(e.message); } };
   const handleReject = async (pid, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'rejected', notes); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
-  const handleModify = async (pid, data, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'modified', notes||'Modified', data); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } };
-  const handleAcceptAll = async () => { if (!confirm('Accept all pending?')) return; setLoading(true); try { await cdService.acceptAllProposals(workingMbrId); fetchProposals(); fetchStatus(); } catch(e) { setError(e.message); } finally { setLoading(false); } };
+  const handleModify = async (pid, data, notes) => { try { await cdService.reviewProposal(workingMbrId, pid, 'modified', notes||'Modified', data); fetchProposals(); fetchStatus(); if (onMbrUpdate) onMbrUpdate(); } catch(e) { setError(e.message); } };
+  const handleAcceptAll = async () => { if (!confirm('Accept all pending?')) return; setLoading(true); try { await cdService.acceptAllProposals(workingMbrId); fetchProposals(); fetchStatus(); if (onMbrUpdate) onMbrUpdate(); } catch(e) { setError(e.message); } finally { setLoading(false); } };
 
   const cur = MODES[mode]; const pipe = PIPELINE[pipeStatus]||PIPELINE.idle;
   const pendingCount = proposals.filter(p=>p.status==='pending').length;
@@ -239,7 +402,7 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
         {[
           { key:'proposals', label:'AI Proposals', icon:Sparkles, count:proposals.length },
           { key:'documents', label:'Documents', icon:Paperclip, count:attachments.length },
-          { key:'voice', label:'Voice AI', icon:voiceActive?MicOff:Mic, count:voiceHistory.length },
+          { key:'voice', label:'Chat', icon:Brain, count:voiceHistory.filter(m=>!m.loading).length },
         ].map(tab => <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{
           flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:6, padding:'10px 16px',
           fontSize:11, fontWeight:600, cursor:'pointer', border:'none', transition:'all 0.15s',
@@ -287,43 +450,98 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
             </div>}
         </>}
 
-        {/* ── TAB: VOICE AI (Interactive AI commands) ── */}
+        {/* ── TAB: CHAT (Conversational AI MBR Design) ── */}
         {activeTab==='voice'&&<>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-            <div style={{ fontSize:11, color:t.textMuted }}>Speak or type commands for hands-free MBR design. Voice AI understands pharma manufacturing instructions.</div>
-            <button onClick={toggleVoice} style={{ display:'flex',alignItems:'center',gap:5,padding:'8px 16px',borderRadius:8,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',background:voiceActive?'#f5365c':'#00e5a0',color:'#fff',animation:voiceActive?'pulse 1.5s infinite':'none' }}>
-              {voiceActive?<><MicOff size={14}/>Stop Listening</>:<><Mic size={14}/>Start Listening</>}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+            <div style={{ fontSize:11, color:t.textMuted }}>Ask questions, request changes, or run gap analysis. The AI sees your current MBR state.</div>
+            <button onClick={toggleVoice} style={{ display:'flex',alignItems:'center',gap:5,padding:'6px 12px',borderRadius:7,fontSize:11,fontWeight:600,cursor:'pointer',border:'1px solid '+(voiceActive?'#f5365c30':t.accent+'30'),background:voiceActive?'#f5365c15':t.accent+'10',color:voiceActive?'#f5365c':t.accent }}>
+              {voiceActive?<><MicOff size={12}/>Stop</>:<><Mic size={12}/>Voice</>}
             </button>
           </div>
 
-          {/* Live transcript */}
-          {voiceActive&&voiceText&&<div style={{ background:t.accent+'08', border:'1px solid '+t.accent+'20', borderRadius:8, padding:'8px 14px', marginBottom:10, display:'flex', alignItems:'center', gap:8 }}>
-            <Mic size={14} color={t.accent}/><span style={{ fontSize:12, color:t.text, flex:1, fontStyle:'italic' }}>"{voiceText}"</span>
-            <span style={{ fontSize:9, color:t.textMuted }}>listening...</span>
+          {/* Quick action chips */}
+          <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:10 }}>
+            {[
+              { label:'What CPPs am I missing?', icon:'🔍' },
+              { label:'Run gap analysis', icon:'📋' },
+              { label:'Suggest IPC checks', icon:'🧪' },
+              { label:'Add a cleaning step', icon:'🧹' },
+              { label:'Review compliance', icon:'✅' },
+            ].map(q => <button key={q.label} onClick={() => { setVoiceHistory(h => [...h, { role:'user', text:q.label, time:new Date().toLocaleTimeString() }]); sendVoiceCommand(q.label); }}
+              style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', borderRadius:6, fontSize:10, fontWeight:600, cursor:'pointer', border:'1px solid '+t.cardBorder, background:t.bgAlt, color:t.textDim, whiteSpace:'nowrap', transition:'border-color 0.15s' }}
+              onMouseEnter={e=>e.target.style.borderColor=t.accent+'60'} onMouseLeave={e=>e.target.style.borderColor=t.cardBorder}>
+              <span>{q.icon}</span>{q.label}
+            </button>)}
+            <button onClick={runValidation} disabled={validating}
+              style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', borderRadius:6, fontSize:10, fontWeight:700, cursor:validating?'wait':'pointer', border:'1px solid #f5365c40', background:'#f5365c10', color:'#f5365c', whiteSpace:'nowrap' }}>
+              {validating?<Loader2 size={10} style={{ animation:'spin 1s linear infinite' }}/>:<span>🛡️</span>}
+              {validating?'Validating...':'Full MBR Validation'}
+            </button>
+          </div>
+
+          {/* Validation results banner */}
+          {validation && <div style={{ background:validation.score>=80?'#00e5a008':validation.score>=50?'#f5a62308':'#f5365c08', border:'1px solid '+(validation.score>=80?'#00e5a030':validation.score>=50?'#f5a62330':'#f5365c30'), borderRadius:8, padding:'10px 14px', marginBottom:10 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+              <span style={{ fontSize:12, fontWeight:700, color:t.text }}>MBR Validation Report</span>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ fontSize:18, fontWeight:800, fontFamily:"'DM Mono',monospace", color:validation.score>=80?'#00e5a0':validation.score>=50?'#f5a623':'#f5365c' }}>{validation.score}</span>
+                <span style={{ fontSize:10, color:t.textMuted }}>/100</span>
+                <button onClick={()=>setValidation(null)} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:2 }}><XCircle size={12}/></button>
+              </div>
+            </div>
+            <div style={{ fontSize:11, color:t.textDim, marginBottom:8 }}>{validation.summary}</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+              {(validation.findings||[]).slice(0,8).map((f,i) => <div key={i} style={{ display:'flex', gap:6, padding:'4px 8px', borderRadius:4, fontSize:10, background:f.severity==='critical'?'#f5365c08':f.severity==='major'?'#f5a62308':t.bgAlt }}>
+                <span style={{ fontWeight:700, color:f.severity==='critical'?'#f5365c':f.severity==='major'?'#f5a623':'#2dceef', minWidth:50, textTransform:'uppercase' }}>{f.severity}</span>
+                <span style={{ color:t.text, flex:1 }}>{f.finding}</span>
+                {f.phase && <span style={{ color:t.textMuted, fontFamily:"'DM Mono',monospace" }}>{f.phase}</span>}
+              </div>)}
+              {(validation.findings||[]).length>8 && <div style={{ fontSize:10, color:t.textMuted, textAlign:'center', padding:4 }}>+{validation.findings.length-8} more findings</div>}
+            </div>
+          </div>}
+
+          {/* Voice status indicator */}
+          {voiceActive && <div style={{ background:voiceStatus==='listening'?'#00e5a008':t.accent+'08', border:'1px solid '+(voiceStatus==='listening'?'#00e5a020':t.accent+'20'), borderRadius:8, padding:'8px 14px', marginBottom:10, display:'flex', alignItems:'center', gap:8 }}>
+            {voiceStatus==='starting' && <><Loader2 size={14} color={t.accent} style={{ animation:'spin 1s linear infinite' }}/><span style={{ fontSize:12, color:t.accent }}>Starting microphone...</span></>}
+            {voiceStatus==='listening' && !voiceText && <><Mic size={14} color="#00e5a0" style={{ animation:'pulse 1.5s infinite' }}/><span style={{ fontSize:12, color:'#00e5a0' }}>Listening... speak now</span></>}
+            {voiceStatus==='processing' && !voiceText && <><Mic size={14} color={t.accent}/><span style={{ fontSize:12, color:t.accent }}>Detecting speech...</span></>}
+            {voiceText && <><Mic size={14} color={t.accent}/><span style={{ fontSize:12, color:t.text, flex:1, fontStyle:'italic' }}>"{voiceText}"</span><span style={{ fontSize:9, color:t.textMuted }}>processing...</span></>}
           </div>}
 
           {/* Chat history */}
-          <div style={{ maxHeight:250, overflowY:'auto', marginBottom:10, display:'flex', flexDirection:'column', gap:6 }}>
+          <div style={{ maxHeight:350, overflowY:'auto', marginBottom:10, display:'flex', flexDirection:'column', gap:6 }}>
             {voiceHistory.length===0&&<div style={{ textAlign:'center', padding:'30px 0', color:t.textMuted, fontSize:11 }}>
-              <Mic size={20} color={t.textMuted} style={{ marginBottom:6, opacity:0.4 }}/><div>Say something like:</div>
-              <div style={{ fontStyle:'italic', marginTop:4 }}>"Add a granulation phase with impeller speed 250 RPM"</div>
-              <div style={{ fontStyle:'italic' }}>"Set compression force target to 25 kN"</div>
+              <Brain size={24} color={t.textMuted} style={{ marginBottom:8, opacity:0.4 }}/><div style={{ fontWeight:600, marginBottom:6 }}>Chat with your MBR Co-Designer</div>
+              <div>Try: "Add a drying phase after granulation at 60°C"</div>
+              <div style={{ marginTop:2 }}>"What IPC checks should I add for compression?"</div>
+              <div style={{ marginTop:2 }}>"Run a gap analysis on this MBR"</div>
             </div>}
             {voiceHistory.map((msg, i) => <div key={i} style={{ display:'flex', gap:8, alignItems:msg.role==='user'?'flex-end':'flex-start', flexDirection:msg.role==='user'?'row-reverse':'row' }}>
-              <div style={{ width:24, height:24, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, background:msg.role==='user'?t.accent+'20':'#00e5a020', color:msg.role==='user'?t.accent:'#00e5a0' }}>
-                {msg.role==='user'?<Mic size={12}/>:<Brain size={12}/>}
+              <div style={{ width:24, height:24, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, background:msg.role==='user'?t.accent+'20':msg.isError?'#f5365c20':'#00e5a020', color:msg.role==='user'?t.accent:msg.isError?'#f5365c':'#00e5a0' }}>
+                {msg.role==='user'?<Send size={11}/>:msg.loading?<Loader2 size={11} style={{ animation:'spin 1s linear infinite' }}/>:<Brain size={11}/>}
               </div>
-              <div style={{ maxWidth:'75%', padding:'8px 12px', borderRadius:8, fontSize:11, background:msg.role==='user'?t.accent+'10':t.bgAlt, color:t.text, border:'1px solid '+(msg.role==='user'?t.accent+'20':t.cardBorder) }}>
-                {msg.text}
-                <div style={{ fontSize:8, color:t.textMuted, marginTop:2, fontFamily:"'DM Mono',monospace" }}>{msg.time}</div>
+              <div style={{ maxWidth:'80%' }}>
+                <div style={{ padding:'8px 12px', borderRadius:8, fontSize:12, lineHeight:1.6, background:msg.role==='user'?t.accent+'10':msg.isError?'#f5365c08':t.bgAlt, color:msg.isError?'#f5365c':t.text, border:'1px solid '+(msg.role==='user'?t.accent+'20':msg.isError?'#f5365c20':t.cardBorder), whiteSpace:'pre-wrap' }}>
+                  {msg.text || (msg.loading ? '' : '...')}{msg.streaming && !msg.loading && <span style={{ display:'inline-block', width:6, height:14, background:t.accent, marginLeft:2, animation:'blink 1s step-end infinite', verticalAlign:'text-bottom' }}/>}
+                </div>
+                {/* Inline proposals from this message */}
+                {msg.proposals&&msg.proposals.length>0&&<div style={{ marginTop:4, display:'flex', flexDirection:'column', gap:3 }}>
+                  {msg.proposals.map((pr, j) => <div key={j} style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 10px', borderRadius:6, background:'#00e5a008', border:'1px solid #00e5a020', fontSize:10 }}>
+                    <CheckCircle size={11} color="#00e5a0"/>
+                    <span style={{ color:t.text, fontWeight:600 }}>{pr.action?.replace(/_/g,' ')}</span>
+                    <span style={{ color:t.textMuted }}>→ proposal created</span>
+                    <span style={{ fontSize:9, color:t.textMuted, fontFamily:"'DM Mono',monospace", marginLeft:'auto' }}>see Proposals tab</span>
+                  </div>)}
+                </div>}
+                <div style={{ fontSize:8, color:t.textMuted, marginTop:2, fontFamily:"'DM Mono',monospace", textAlign:msg.role==='user'?'right':'left' }}>{msg.time}</div>
               </div>
             </div>)}
           </div>
 
-          {/* Text input (alternative to voice) */}
+          {/* Text input */}
           <div style={{ display:'flex', gap:6 }}>
-            <input value={voiceCmd} onChange={e=>setVoiceCmd(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendTextCommand()} placeholder="Type a design command..." style={{ flex:1, background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:8, padding:'8px 12px', fontSize:12, outline:'none' }}/>
-            <button onClick={sendTextCommand} disabled={!voiceCmd.trim()} style={{ display:'flex', alignItems:'center', gap:4, padding:'8px 14px', borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer', border:'none', background:t.accent, color:'#fff', opacity:voiceCmd.trim()?1:0.4 }}><Send size={13}/>Send</button>
+            <input value={voiceCmd} onChange={e=>setVoiceCmd(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendTextCommand()} placeholder="Ask the Co-Designer anything about your MBR..." style={{ flex:1, background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:8, padding:'9px 12px', fontSize:12, outline:'none' }}/>
+            <button onClick={sendTextCommand} disabled={!voiceCmd.trim()} style={{ display:'flex', alignItems:'center', gap:4, padding:'9px 14px', borderRadius:8, fontSize:12, fontWeight:600, cursor:voiceCmd.trim()?'pointer':'default', border:'none', background:voiceCmd.trim()?t.accent:t.bgAlt, color:voiceCmd.trim()?'#fff':t.textMuted }}><Send size={13}/></button>
           </div>
         </>}
       </div>
@@ -331,7 +549,7 @@ export default function CoDesignerPanel({ mbrId, t, disabled, cdService, feature
 
     {showPwModal&&<PwModal t={t} onConfirm={pw=>doCoDesignAuth(pw)} onCancel={()=>{setShowPwModal(false);setPendingMode(null);}}/>}
 
-    <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.7} }`}</style>
+    <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.7} } @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
   </div>;
 }
 

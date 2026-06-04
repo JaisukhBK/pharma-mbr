@@ -8,7 +8,7 @@ const { query } = require('../db/pool');
 const { authenticate, authorize, verifyPasswordForSignature } = require('../middleware/middleware');
 const { auditMiddleware } = require('../middleware/middleware');
 // pdfParser functions now exported from coDesignerAgent (merged)
-const { parsePDF, cleanText, extractSections, runPipeline, applyProposal } = require('../services/coDesignerAgent');  // ← CHANGED: single import (pdfParser merged in)
+const { parsePDF, cleanText, extractSections, runPipeline, applyProposal, chatWithContext, buildMBRContext, streamChatWithContext, validateMBR } = require('../services/coDesignerAgent');
 
 const router = Router();
 router.use(authenticate);
@@ -308,6 +308,162 @@ router.post('/:mbrId/proposals/accept-all', authorize('co_designer:review'), asy
 
     res.json({ total: pending.rows.length, applied, errors });
   } catch (err) { res.status(500).json({ error: 'Failed' }); }
+});
+
+// ═══ CHAT — Conversational MBR Design with Context ═══
+router.post('/:mbrId/chat', authorize('co_designer:review'), async (req, res) => {
+  try {
+    const { message, history } = req.body;
+    if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required' });
+
+    // Verify session is active
+    const sessR = await query(
+      'SELECT id, mode FROM co_designer_sessions WHERE mbr_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 1',
+      [req.params.mbrId, req.session.userId]
+    );
+    if (sessR.rows.length === 0 || sessR.rows[0].mode === 'off') {
+      return res.status(400).json({ error: 'Co-Designer must be in Assist or Co-Design mode' });
+    }
+    const sessionId = sessR.rows[0].id;
+
+    // Call AI with MBR context
+    const result = await chatWithContext(req.params.mbrId, message.trim(), history || []);
+
+    // If AI returned proposals, save them to DB
+    const savedProposals = [];
+    for (const p of (result.proposals || [])) {
+      const action = p.action || 'chat_suggestion';
+      const data = p.data || p;
+      // Map action to proposal_type
+      let proposalType = 'step';
+      if (action.includes('phase')) proposalType = 'phase';
+      else if (action.includes('parameter')) proposalType = 'step'; // params are part of steps
+      else if (action.includes('bom')) proposalType = 'bom_item';
+      else if (action.includes('gap') || action.includes('review')) proposalType = 'full_structure';
+
+      const reasoning = `Chat: "${message.trim().substring(0, 80)}" → ${action}`;
+      await query(
+        'INSERT INTO co_designer_proposals (session_id, mbr_id, proposal_type, proposed_data, confidence, reasoning) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+        [sessionId, req.params.mbrId, proposalType, JSON.stringify(data), 0.85, reasoning]
+      );
+      savedProposals.push({ action, data, reasoning });
+    }
+
+    await req.audit({
+      action: 'CO_DESIGNER_CHAT', resourceType: 'CO_DESIGNER', resourceId: req.params.mbrId,
+      details: `Chat: "${message.trim().substring(0, 100)}" → ${savedProposals.length} proposals`,
+    });
+
+    res.json({
+      text: result.text,
+      proposals: savedProposals,
+      proposals_created: savedProposals.length,
+    });
+  } catch (err) {
+    console.error('[CO-DESIGNER] Chat error:', err);
+    res.status(500).json({ error: 'Chat failed: ' + err.message });
+  }
+});
+
+// ═══ MBR CONTEXT (for frontend display) ═══
+router.get('/:mbrId/context', authorize('co_designer:review'), async (req, res) => {
+  try {
+    const ctx = await buildMBRContext(req.params.mbrId);
+    res.json({ context: ctx });
+  } catch (err) { res.status(500).json({ error: 'Failed to build context' }); }
+});
+
+// ═══ CHAT STREAM — SSE streaming for real-time response ═══
+router.post('/:mbrId/chat-stream', authorize('co_designer:review'), async (req, res) => {
+  try {
+    const { message, history } = req.body;
+    if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required' });
+
+    const sessR = await query(
+      'SELECT id, mode FROM co_designer_sessions WHERE mbr_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 1',
+      [req.params.mbrId, req.session.userId]
+    );
+    if (sessR.rows.length === 0 || sessR.rows[0].mode === 'off') {
+      return res.status(400).json({ error: 'Co-Designer must be active' });
+    }
+    const sessionId = sessR.rows[0].id;
+
+    // SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let fullText = '';
+    try {
+      for await (const chunk of streamChatWithContext(req.params.mbrId, message.trim(), history || [])) {
+        fullText += chunk;
+        res.write(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`);
+      }
+    } catch (streamErr) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: streamErr.message })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Extract proposals from full response
+    const proposals = [];
+    const proposalRegex = /<proposal>([\s\S]*?)<\/proposal>/g;
+    let match;
+    while ((match = proposalRegex.exec(fullText)) !== null) {
+      try {
+        const cleaned = match[1].replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        proposals.push(JSON.parse(cleaned));
+      } catch {}
+    }
+
+    // Save proposals to DB
+    const savedProposals = [];
+    for (const p of proposals) {
+      const action = p.action || 'chat_suggestion';
+      const data = p.data || p;
+      let proposalType = 'step';
+      if (action.includes('phase')) proposalType = 'phase';
+      else if (action.includes('bom')) proposalType = 'bom_item';
+      const reasoning = `Chat: "${message.trim().substring(0, 80)}" → ${action}`;
+      await query(
+        'INSERT INTO co_designer_proposals (session_id, mbr_id, proposal_type, proposed_data, confidence, reasoning) VALUES ($1,$2,$3,$4,$5,$6)',
+        [sessionId, req.params.mbrId, proposalType, JSON.stringify(data), 0.85, reasoning]
+      );
+      savedProposals.push({ action, data, reasoning });
+    }
+
+    const displayText = fullText.replace(/<proposal>[\s\S]*?<\/proposal>/g, '').trim();
+
+    // Send final event with proposals
+    res.write(`data: ${JSON.stringify({ type: 'done', text: displayText, proposals: savedProposals, proposals_created: savedProposals.length })}\n\n`);
+    res.end();
+
+    await req.audit({
+      action: 'CO_DESIGNER_CHAT', resourceType: 'CO_DESIGNER', resourceId: req.params.mbrId,
+      details: `Chat stream: "${message.trim().substring(0, 100)}" → ${savedProposals.length} proposals`,
+    });
+  } catch (err) {
+    console.error('[CO-DESIGNER] Stream error:', err);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else { res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`); res.end(); }
+  }
+});
+
+// ═══ VALIDATE — AI-powered MBR compliance check ═══
+router.post('/:mbrId/validate', authorize('co_designer:review'), async (req, res) => {
+  try {
+    const result = await validateMBR(req.params.mbrId);
+    await req.audit({
+      action: 'CO_DESIGNER_VALIDATE', resourceType: 'CO_DESIGNER', resourceId: req.params.mbrId,
+      details: `Validation: score ${result.score}/100, ${result.findings?.length || 0} findings`,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[CO-DESIGNER] Validate error:', err);
+    res.status(500).json({ error: 'Validation failed: ' + err.message });
+  }
 });
 
 // ═══ METRICS ═══

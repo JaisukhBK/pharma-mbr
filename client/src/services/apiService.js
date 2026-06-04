@@ -166,6 +166,54 @@ export const cdService = {
 
   getExtractedText: (mbrId) => f(`${CD}/${mbrId}/extracted-text`),
 
+  // Chat — conversational MBR design with context awareness
+  chat: (mbrId, message, history) =>
+    f(`${CD}/${mbrId}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message, history }),
+    }),
+
+  // Chat Stream — SSE streaming for real-time response
+  async chatStream(mbrId, message, history, onChunk, onDone, onError) {
+    const token = localStorage.getItem('pharma_mbr_token');
+    try {
+      const res = await fetch(`${CD}/${mbrId}/chat-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message, history }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Stream failed'); }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const d = JSON.parse(line.slice(6));
+              if (d.type === 'chunk' && onChunk) onChunk(d.text);
+              else if (d.type === 'done' && onDone) onDone(d);
+              else if (d.type === 'error' && onError) onError(d.error);
+            } catch {}
+          }
+        }
+      }
+    } catch (e) { if (onError) onError(e.message); }
+  },
+
+  // Validate — AI-powered MBR compliance check
+  validate: (mbrId) =>
+    f(`${CD}/${mbrId}/validate`, { method: 'POST' }),
+
+  // MBR Context — current state summary for display
+  getContext: (mbrId) => f(`${CD}/${mbrId}/context`),
+
   async pollUntilDone(mbrId, onUpdate, intervalMs = 2000, maxAttempts = 60) {
     for (let i = 0; i < maxAttempts; i++) {
       const status = await this.getCoDesignerStatus(mbrId);

@@ -4,9 +4,14 @@
 // ============================================================================
 
 import { mbrService } from '../../services/apiService';
+import { cdService, featuresService } from '../../services/apiService';
 import { DEMO_MBR, DEMO_BOM, DEMO_PHASES, DEMO_SIGNATURES } from './mbrDemoData';
 import ApprovalWorkflowBar from './ApprovalWorkflowBar';
 import VersionHistoryPanel from './VersionHistoryPanel';
+import CoDesignerPanel from './CoDesignerPanel';
+import {
+  Badge, StatusBadge, Card, Btn, Input, Select, ToggleChip, SectionTitle, STATUS_META,
+} from '../ui/PharmUI';
 import { useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import {
   Shield, FileText, Plus, Trash2, ChevronDown, ChevronRight,
@@ -15,7 +20,8 @@ import {
   ArrowRight, Layers, Package, Hash, Loader2, Play, Pause,
   Move, Zap, Activity, Target, Beaker, FlaskConical, ChevronUp,
   Radio, Wifi, Database, Bell, ArrowUpDown, Link2, Server, Gauge,
-  TestTube, Calculator, Droplets, Thermometer, ClipboardCheck, Scale
+  TestTube, Calculator, Droplets, Thermometer, ClipboardCheck, Scale,
+  ShieldOff
 } from "lucide-react";
 
 // ISA-88 Recipe Hierarchy:
@@ -35,82 +41,10 @@ const SIGNATURE_ROLES = [
   { role: "QA_Approver", meaning: "QA final approval for production release" },
 ];
 
-const STATUS_META = {
-  Draft:        { color: '#f5a623', icon: PenTool },
-  'In Review':  { color: '#2dceef', icon: Eye },
-  Approved:     { color: '#00e5a0', icon: CheckCircle },
-  Effective:    { color: '#00e5a0', icon: Shield },
-  Superseded:   { color: '#7a8ba8', icon: RotateCcw },
-  Obsolete:     { color: '#f5365c', icon: X },
-};
-
 // ════════════════════════════════════════════════════════════════════════════
-// SHARED UI HELPERS (inline styles, theme-aware)
+// SHARED UI HELPERS — imported from ../ui/PharmUI.jsx
+// Badge, StatusBadge, Card, Btn, Input, Select, ToggleChip, SectionTitle
 // ════════════════════════════════════════════════════════════════════════════
-
-function MBRBadge({ children, color, t }) {
-  return <span style={{ display:'inline-flex', alignItems:'center', gap:4, background:color+'15', border:'1px solid '+color+'30', color, borderRadius:5, padding:'2px 9px', fontSize:11, fontWeight:600 }}>{children}</span>;
-}
-
-function MBRStatusBadge({ status, t }) {
-  const meta = STATUS_META[status] || STATUS_META.Draft;
-  const Icon = meta.icon;
-  return <MBRBadge color={meta.color} t={t}><Icon size={11}/>{status}</MBRBadge>;
-}
-
-function MBRCard({ children, t, style }) {
-  return <div style={{ background:t.card, border:'1px solid '+t.cardBorder, borderRadius:12, padding:18, ...style }}>{children}</div>;
-}
-
-function MBRBtn({ children, t, variant='primary', size='md', disabled, ...props }) {
-  const base = { border:'none', borderRadius:8, cursor: disabled?'not-allowed':'pointer', fontWeight:600, display:'inline-flex', alignItems:'center', gap:6, fontSize: size==='sm'?12:13, padding: size==='sm'?'5px 12px':'9px 18px', opacity: disabled?0.4:1, transition:'all 0.2s' };
-  const v = {
-    primary: { background:t.accent, color:'#fff' },
-    ghost: { background:'transparent', color:t.textDim, border:'1px solid '+t.cardBorder },
-    danger: { background:t.danger+'15', color:t.danger, border:'1px solid '+t.danger+'30' },
-    accent: { background:t.accent+'15', color:t.accent, border:'1px solid '+t.accent+'30' },
-  };
-  return <button {...props} disabled={disabled} style={{ ...base, ...v[variant], ...props.style }}>{children}</button>;
-}
-
-function MBRInput({ label, t, required, unit, ...props }) {
-  return <div style={{ marginBottom:10 }}>
-    <label style={{ color:t.textDim, fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, marginBottom:4, display:'block' }}>
-      {label} {required && <span style={{color:t.danger}}>*</span>}
-    </label>
-    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-      <input {...props} style={{ flex:1, boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:8, padding:'9px 12px', fontSize:13, outline:'none', ...props.style }} />
-      {unit && <span style={{ color:t.textMuted, fontSize:11, fontFamily:"'DM Mono',monospace" }}>{unit}</span>}
-    </div>
-  </div>;
-}
-
-function MBRSelect({ label, t, options, required, ...props }) {
-  return <div style={{ marginBottom:10 }}>
-    <label style={{ color:t.textDim, fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, marginBottom:4, display:'block' }}>
-      {label} {required && <span style={{color:t.danger}}>*</span>}
-    </label>
-    <select {...props} style={{ width:'100%', boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:8, padding:'9px 12px', fontSize:13, outline:'none', ...props.style }}>
-      {options.map(o => <option key={o} value={o}>{o}</option>)}
-    </select>
-  </div>;
-}
-
-function ToggleChip({ label, active, onClick, color, t }) {
-  const c = active ? (color || t.accent) : t.textMuted;
-  return <button onClick={onClick} style={{ background: active ? c+'18' : 'transparent', border:'1px solid '+(active ? c+'40' : t.cardBorder), color: c, borderRadius:5, padding:'2px 8px', fontSize:10, fontWeight:700, fontFamily:"'DM Mono',monospace", cursor:'pointer', transition:'all 0.15s' }}>{label}</button>;
-}
-
-function SectionTitle({ icon: Icon, title, count, t, right }) {
-  return <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-      <div style={{ background:t.accent+'12', borderRadius:7, padding:6, display:'flex' }}><Icon size={15} color={t.accent}/></div>
-      <span style={{ color:t.text, fontSize:14, fontWeight:700 }}>{title}</span>
-      {count !== undefined && <span style={{ background:t.bgAlt, color:t.textMuted, fontSize:10, fontFamily:"'DM Mono',monospace", padding:'1px 7px', borderRadius:4 }}>{count}</span>}
-    </div>
-    {right}
-  </div>;
-}
 
 // ════════════════════════════════════════════════════════════════════════════
 // ISA-88 PROCESS FLOW VISUALIZATION
@@ -150,11 +84,11 @@ function ProcessFlowBar({ phases, currentPhase, t }) {
 
 function ParamRow({ param, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'1.5fr 0.7fr 0.5fr 0.5fr 0.5fr auto auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'40' }}>
-    <MBRInput label="Parameter" t={t} value={param.param_name} onChange={e => onUpdate({ ...param, param_name:e.target.value })} disabled={disabled} placeholder="e.g. Temperature" />
-    <MBRInput label="Target" t={t} value={param.target_value} onChange={e => onUpdate({ ...param, target_value:e.target.value })} disabled={disabled} placeholder="60" />
-    <MBRInput label="Unit" t={t} value={param.unit} onChange={e => onUpdate({ ...param, unit:e.target.value })} disabled={disabled} placeholder="°C" />
-    <MBRInput label="Low" t={t} value={param.lower_limit} onChange={e => onUpdate({ ...param, lower_limit:e.target.value })} disabled={disabled} type="number" />
-    <MBRInput label="High" t={t} value={param.upper_limit} onChange={e => onUpdate({ ...param, upper_limit:e.target.value })} disabled={disabled} type="number" />
+    <Input label="Parameter" t={t} value={param.param_name} onChange={v => onUpdate({ ...param, param_name:v })} disabled={disabled} placeholder="e.g. Temperature" />
+    <Input label="Target" t={t} value={param.target_value} onChange={v => onUpdate({ ...param, target_value:v })} disabled={disabled} placeholder="60" />
+    <Input label="Unit" t={t} value={param.unit} onChange={v => onUpdate({ ...param, unit:v })} disabled={disabled} placeholder="°C" />
+    <Input label="Low" t={t} value={param.lower_limit} onChange={v => onUpdate({ ...param, lower_limit:v })} disabled={disabled} type="number" />
+    <Input label="High" t={t} value={param.upper_limit} onChange={v => onUpdate({ ...param, upper_limit:v })} disabled={disabled} type="number" />
     <div style={{ display:'flex', gap:4, paddingBottom:12 }}>
       <ToggleChip label="CPP" active={param.is_cpp} onClick={() => onUpdate({ ...param, is_cpp:!param.is_cpp })} color={t.danger} t={t} />
       <ToggleChip label="CQA" active={param.is_cqa} onClick={() => onUpdate({ ...param, is_cqa:!param.is_cqa })} color={t.warning} t={t} />
@@ -169,11 +103,11 @@ function ParamRow({ param, onUpdate, onDelete, t, disabled }) {
 
 function MaterialRow({ mat, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'0.7fr 1.5fr 0.8fr 0.5fr 0.4fr auto auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'40' }}>
-    <MBRInput label="Code" t={t} value={mat.material_code} onChange={e => onUpdate({ ...mat, material_code:e.target.value })} disabled={disabled} placeholder="RM-001" />
-    <MBRInput label="Name" t={t} value={mat.material_name} onChange={e => onUpdate({ ...mat, material_name:e.target.value })} disabled={disabled} placeholder="Microcrystalline Cellulose" />
-    <MBRSelect label="Type" t={t} value={mat.material_type} onChange={e => onUpdate({ ...mat, material_type:e.target.value })} options={MATERIAL_TYPES} disabled={disabled} />
-    <MBRInput label="Qty" t={t} value={mat.quantity} onChange={e => onUpdate({ ...mat, quantity:e.target.value })} disabled={disabled} type="number" />
-    <MBRInput label="Unit" t={t} value={mat.unit} onChange={e => onUpdate({ ...mat, unit:e.target.value })} disabled={disabled} placeholder="kg" />
+    <Input label="Code" t={t} value={mat.material_code} onChange={v => onUpdate({ ...mat, material_code:v })} disabled={disabled} placeholder="RM-001" />
+    <Input label="Name" t={t} value={mat.material_name} onChange={v => onUpdate({ ...mat, material_name:v })} disabled={disabled} placeholder="Microcrystalline Cellulose" />
+    <Select label="Type" t={t} value={mat.material_type} onChange={v => onUpdate({ ...mat, material_type:v })} options={MATERIAL_TYPES} disabled={disabled} />
+    <Input label="Qty" t={t} value={mat.quantity} onChange={v => onUpdate({ ...mat, quantity:v })} disabled={disabled} type="number" />
+    <Input label="Unit" t={t} value={mat.unit} onChange={v => onUpdate({ ...mat, unit:v })} disabled={disabled} placeholder="kg" />
     <div style={{ paddingBottom:12 }}><ToggleChip label="API" active={mat.is_active} onClick={() => onUpdate({ ...mat, is_active:!mat.is_active })} color={t.danger} t={t} /></div>
     {!disabled && <button onClick={() => onDelete(mat.id)} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4, paddingBottom:14 }}><Trash2 size={13}/></button>}
   </div>;
@@ -185,10 +119,10 @@ function MaterialRow({ mat, onUpdate, onDelete, t, disabled }) {
 
 function EquipmentRow({ eq, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'0.7fr 1.5fr 0.8fr 0.6fr auto auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'40' }}>
-    <MBRInput label="Code" t={t} value={eq.equipment_code} onChange={e => onUpdate({ ...eq, equipment_code:e.target.value })} disabled={disabled} placeholder="EQ-GRN-001" />
-    <MBRInput label="Name" t={t} value={eq.equipment_name} onChange={e => onUpdate({ ...eq, equipment_name:e.target.value })} disabled={disabled} placeholder="High-Shear Granulator" />
-    <MBRSelect label="Type" t={t} value={eq.equipment_type} onChange={e => onUpdate({ ...eq, equipment_type:e.target.value })} options={EQUIPMENT_TYPES} disabled={disabled} />
-    <MBRInput label="Capacity" t={t} value={eq.capacity} onChange={e => onUpdate({ ...eq, capacity:e.target.value })} disabled={disabled} placeholder="300L" />
+    <Input label="Code" t={t} value={eq.equipment_code} onChange={v => onUpdate({ ...eq, equipment_code:v })} disabled={disabled} placeholder="EQ-GRN-001" />
+    <Input label="Name" t={t} value={eq.equipment_name} onChange={v => onUpdate({ ...eq, equipment_name:v })} disabled={disabled} placeholder="High-Shear Granulator" />
+    <Select label="Type" t={t} value={eq.equipment_type} onChange={v => onUpdate({ ...eq, equipment_type:v })} options={EQUIPMENT_TYPES} disabled={disabled} />
+    <Input label="Capacity" t={t} value={eq.capacity} onChange={v => onUpdate({ ...eq, capacity:v })} disabled={disabled} placeholder="300L" />
     <div style={{ paddingBottom:12 }}><ToggleChip label="Primary" active={eq.is_primary} onClick={() => onUpdate({ ...eq, is_primary:!eq.is_primary })} t={t} /></div>
     {!disabled && <button onClick={() => onDelete(eq.id)} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4, paddingBottom:14 }}><Trash2 size={13}/></button>}
   </div>;
@@ -208,21 +142,21 @@ const CONTROL_MODULE_TYPES = ['PID Loop', 'Sequence', 'Interlock', 'Discrete', '
 
 function OpcUaTagRow({ tag, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'1.2fr 2fr 0.7fr 0.7fr 0.6fr auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
-    <MBRInput label="Tag Name" t={t} value={tag.tag_name} onChange={e => onUpdate({ ...tag, tag_name:e.target.value })} disabled={disabled} placeholder="TT-101.PV" />
-    <MBRInput label="OPC-UA Node ID" t={t} value={tag.node_id} onChange={e => onUpdate({ ...tag, node_id:e.target.value })} disabled={disabled} placeholder="ns=2;s=PLC1.Granulator.TT101.PV" />
-    <MBRSelect label="Data Type" t={t} value={tag.data_type} onChange={e => onUpdate({ ...tag, data_type:e.target.value })} options={OPC_DATA_TYPES} disabled={disabled} />
-    <MBRSelect label="Access" t={t} value={tag.access} onChange={e => onUpdate({ ...tag, access:e.target.value })} options={OPC_ACCESS} disabled={disabled} />
-    <MBRInput label="Eng Unit" t={t} value={tag.eng_unit} onChange={e => onUpdate({ ...tag, eng_unit:e.target.value })} disabled={disabled} placeholder="°C" />
+    <Input label="Tag Name" t={t} value={tag.tag_name} onChange={v => onUpdate({ ...tag, tag_name:v })} disabled={disabled} placeholder="TT-101.PV" />
+    <Input label="OPC-UA Node ID" t={t} value={tag.node_id} onChange={v => onUpdate({ ...tag, node_id:v })} disabled={disabled} placeholder="ns=2;s=PLC1.Granulator.TT101.PV" />
+    <Select label="Data Type" t={t} value={tag.data_type} onChange={v => onUpdate({ ...tag, data_type:v })} options={OPC_DATA_TYPES} disabled={disabled} />
+    <Select label="Access" t={t} value={tag.access} onChange={v => onUpdate({ ...tag, access:v })} options={OPC_ACCESS} disabled={disabled} />
+    <Input label="Eng Unit" t={t} value={tag.eng_unit} onChange={v => onUpdate({ ...tag, eng_unit:v })} disabled={disabled} placeholder="°C" />
     {!disabled && <button onClick={() => onDelete(tag.id)} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4, paddingBottom:14 }}><Trash2 size={13}/></button>}
   </div>;
 }
 
 function ControlModuleRow({ cm, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1.5fr 0.8fr auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
-    <MBRInput label="Module ID" t={t} value={cm.module_id} onChange={e => onUpdate({ ...cm, module_id:e.target.value })} disabled={disabled} placeholder="CM-GRN-TIC-101" />
-    <MBRInput label="Module Name" t={t} value={cm.module_name} onChange={e => onUpdate({ ...cm, module_name:e.target.value })} disabled={disabled} placeholder="Granulator Temp Control" />
-    <MBRSelect label="Type" t={t} value={cm.module_type} onChange={e => onUpdate({ ...cm, module_type:e.target.value })} options={CONTROL_MODULE_TYPES} disabled={disabled} />
-    <MBRInput label="Equipment Phase" t={t} value={cm.equipment_phase} onChange={e => onUpdate({ ...cm, equipment_phase:e.target.value })} disabled={disabled} placeholder="e.g. Heat_Up, Mix, Dry" />
+    <Input label="Module ID" t={t} value={cm.module_id} onChange={v => onUpdate({ ...cm, module_id:v })} disabled={disabled} placeholder="CM-GRN-TIC-101" />
+    <Input label="Module Name" t={t} value={cm.module_name} onChange={v => onUpdate({ ...cm, module_name:v })} disabled={disabled} placeholder="Granulator Temp Control" />
+    <Select label="Type" t={t} value={cm.module_type} onChange={v => onUpdate({ ...cm, module_type:v })} options={CONTROL_MODULE_TYPES} disabled={disabled} />
+    <Input label="Equipment Phase" t={t} value={cm.equipment_phase} onChange={v => onUpdate({ ...cm, equipment_phase:v })} disabled={disabled} placeholder="e.g. Heat_Up, Mix, Dry" />
     <div style={{ display:'flex', gap:4, paddingBottom:12 }}>
       <ToggleChip label="Active" active={cm.is_active} onClick={() => onUpdate({ ...cm, is_active:!cm.is_active })} t={t} />
     </div>
@@ -232,22 +166,22 @@ function ControlModuleRow({ cm, onUpdate, onDelete, t, disabled }) {
 
 function AlarmConfigRow({ alarm, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'1.2fr 0.8fr 0.8fr 0.7fr 0.6fr 0.6fr auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
-    <MBRInput label="Tag Reference" t={t} value={alarm.tag_ref} onChange={e => onUpdate({ ...alarm, tag_ref:e.target.value })} disabled={disabled} placeholder="TT-101.PV" />
-    <MBRSelect label="Alarm Type" t={t} value={alarm.alarm_type} onChange={e => onUpdate({ ...alarm, alarm_type:e.target.value })} options={ALARM_TYPES} disabled={disabled} />
-    <MBRInput label="Setpoint" t={t} value={alarm.setpoint} onChange={e => onUpdate({ ...alarm, setpoint:e.target.value })} disabled={disabled} type="number" placeholder="65" />
-    <MBRInput label="Deadband" t={t} value={alarm.deadband} onChange={e => onUpdate({ ...alarm, deadband:e.target.value })} disabled={disabled} type="number" placeholder="0.5" />
-    <MBRSelect label="Priority" t={t} value={alarm.priority} onChange={e => onUpdate({ ...alarm, priority:e.target.value })} options={ALARM_PRIORITIES} disabled={disabled} />
-    <MBRInput label="Delay (s)" t={t} value={alarm.delay_sec} onChange={e => onUpdate({ ...alarm, delay_sec:e.target.value })} disabled={disabled} type="number" placeholder="5" />
+    <Input label="Tag Reference" t={t} value={alarm.tag_ref} onChange={v => onUpdate({ ...alarm, tag_ref:v })} disabled={disabled} placeholder="TT-101.PV" />
+    <Select label="Alarm Type" t={t} value={alarm.alarm_type} onChange={v => onUpdate({ ...alarm, alarm_type:v })} options={ALARM_TYPES} disabled={disabled} />
+    <Input label="Setpoint" t={t} value={alarm.setpoint} onChange={v => onUpdate({ ...alarm, setpoint:v })} disabled={disabled} type="number" placeholder="65" />
+    <Input label="Deadband" t={t} value={alarm.deadband} onChange={v => onUpdate({ ...alarm, deadband:v })} disabled={disabled} type="number" placeholder="0.5" />
+    <Select label="Priority" t={t} value={alarm.priority} onChange={v => onUpdate({ ...alarm, priority:v })} options={ALARM_PRIORITIES} disabled={disabled} />
+    <Input label="Delay (s)" t={t} value={alarm.delay_sec} onChange={v => onUpdate({ ...alarm, delay_sec:v })} disabled={disabled} type="number" placeholder="5" />
     {!disabled && <button onClick={() => onDelete(alarm.id)} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4, paddingBottom:14 }}><Trash2 size={13}/></button>}
   </div>;
 }
 
 function HistorianTagRow({ htag, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'1.2fr 1.5fr 0.8fr 0.7fr 0.7fr auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
-    <MBRInput label="Tag Name" t={t} value={htag.tag_name} onChange={e => onUpdate({ ...htag, tag_name:e.target.value })} disabled={disabled} placeholder="TT-101.PV" />
-    <MBRInput label="Historian Path" t={t} value={htag.historian_path} onChange={e => onUpdate({ ...htag, historian_path:e.target.value })} disabled={disabled} placeholder="\\\\PISERVER\\GRN.TT101.PV" />
-    <MBRSelect label="Collection" t={t} value={htag.collection_mode} onChange={e => onUpdate({ ...htag, collection_mode:e.target.value })} options={HISTORIAN_MODES} disabled={disabled} />
-    <MBRInput label="Interval" t={t} value={htag.interval_sec} onChange={e => onUpdate({ ...htag, interval_sec:e.target.value })} disabled={disabled} type="number" unit="sec" placeholder="10" />
+    <Input label="Tag Name" t={t} value={htag.tag_name} onChange={v => onUpdate({ ...htag, tag_name:v })} disabled={disabled} placeholder="TT-101.PV" />
+    <Input label="Historian Path" t={t} value={htag.historian_path} onChange={v => onUpdate({ ...htag, historian_path:v })} disabled={disabled} placeholder="\\\\PISERVER\\GRN.TT101.PV" />
+    <Select label="Collection" t={t} value={htag.collection_mode} onChange={v => onUpdate({ ...htag, collection_mode:v })} options={HISTORIAN_MODES} disabled={disabled} />
+    <Input label="Interval" t={t} value={htag.interval_sec} onChange={v => onUpdate({ ...htag, interval_sec:v })} disabled={disabled} type="number" unit="sec" placeholder="10" />
     <div style={{ display:'flex', gap:4, paddingBottom:12 }}>
       <ToggleChip label="Archive" active={htag.archive_enabled} onClick={() => onUpdate({ ...htag, archive_enabled:!htag.archive_enabled })} t={t} />
       <ToggleChip label="Compress" active={htag.compression} onClick={() => onUpdate({ ...htag, compression:!htag.compression })} color={t.info} t={t} />
@@ -258,11 +192,11 @@ function HistorianTagRow({ htag, onUpdate, onDelete, t, disabled }) {
 
 function SetpointConfigRow({ sp, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'1fr 1.5fr 0.7fr 0.7fr 0.8fr auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
-    <MBRInput label="Parameter" t={t} value={sp.param_name} onChange={e => onUpdate({ ...sp, param_name:e.target.value })} disabled={disabled} placeholder="Temperature" />
-    <MBRInput label="Target OPC Tag" t={t} value={sp.target_tag} onChange={e => onUpdate({ ...sp, target_tag:e.target.value })} disabled={disabled} placeholder="ns=2;s=PLC1.GRN.TIC101.SP" />
-    <MBRInput label="Value" t={t} value={sp.setpoint_value} onChange={e => onUpdate({ ...sp, setpoint_value:e.target.value })} disabled={disabled} type="number" placeholder="60" />
-    <MBRInput label="Unit" t={t} value={sp.unit} onChange={e => onUpdate({ ...sp, unit:e.target.value })} disabled={disabled} placeholder="°C" />
-    <MBRSelect label="Push Mode" t={t} value={sp.push_mode} onChange={e => onUpdate({ ...sp, push_mode:e.target.value })} options={SETPOINT_MODES} disabled={disabled} />
+    <Input label="Parameter" t={t} value={sp.param_name} onChange={v => onUpdate({ ...sp, param_name:v })} disabled={disabled} placeholder="Temperature" />
+    <Input label="Target OPC Tag" t={t} value={sp.target_tag} onChange={v => onUpdate({ ...sp, target_tag:v })} disabled={disabled} placeholder="ns=2;s=PLC1.GRN.TIC101.SP" />
+    <Input label="Value" t={t} value={sp.setpoint_value} onChange={v => onUpdate({ ...sp, setpoint_value:v })} disabled={disabled} type="number" placeholder="60" />
+    <Input label="Unit" t={t} value={sp.unit} onChange={v => onUpdate({ ...sp, unit:v })} disabled={disabled} placeholder="°C" />
+    <Select label="Push Mode" t={t} value={sp.push_mode} onChange={v => onUpdate({ ...sp, push_mode:v })} options={SETPOINT_MODES} disabled={disabled} />
     {!disabled && <button onClick={() => onDelete(sp.id)} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4, paddingBottom:14 }}><Trash2 size={13}/></button>}
   </div>;
 }
@@ -310,7 +244,7 @@ function L2ConfigPanel({ l2Config, onUpdate, t, disabled }) {
       {(cfg.opc_tags||[]).map(tag => <OpcUaTagRow key={tag.id} tag={tag} t={t} disabled={disabled}
         onUpdate={u => onUpdate({ ...cfg, opc_tags:cfg.opc_tags.map(x => x.id===tag.id?u:x) })}
         onDelete={id => onUpdate({ ...cfg, opc_tags:cfg.opc_tags.filter(x => x.id!==id) })} />)}
-      {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addOpc} style={{marginTop:8}}><Plus size={12}/>Add OPC-UA Tag</MBRBtn>}
+      {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addOpc} style={{marginTop:8}}><Plus size={12}/>Add OPC-UA Tag</Btn>}
     </div>}
 
     {/* Control Modules */}
@@ -319,7 +253,7 @@ function L2ConfigPanel({ l2Config, onUpdate, t, disabled }) {
       {(cfg.control_modules||[]).map(cm => <ControlModuleRow key={cm.id} cm={cm} t={t} disabled={disabled}
         onUpdate={u => onUpdate({ ...cfg, control_modules:cfg.control_modules.map(x => x.id===cm.id?u:x) })}
         onDelete={id => onUpdate({ ...cfg, control_modules:cfg.control_modules.filter(x => x.id!==id) })} />)}
-      {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addCM} style={{marginTop:8}}><Plus size={12}/>Add Control Module</MBRBtn>}
+      {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addCM} style={{marginTop:8}}><Plus size={12}/>Add Control Module</Btn>}
     </div>}
 
     {/* Setpoint Push */}
@@ -328,7 +262,7 @@ function L2ConfigPanel({ l2Config, onUpdate, t, disabled }) {
       {(cfg.setpoints||[]).map(sp => <SetpointConfigRow key={sp.id} sp={sp} t={t} disabled={disabled}
         onUpdate={u => onUpdate({ ...cfg, setpoints:cfg.setpoints.map(x => x.id===sp.id?u:x) })}
         onDelete={id => onUpdate({ ...cfg, setpoints:cfg.setpoints.filter(x => x.id!==id) })} />)}
-      {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addSP} style={{marginTop:8}}><Plus size={12}/>Add Setpoint Config</MBRBtn>}
+      {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addSP} style={{marginTop:8}}><Plus size={12}/>Add Setpoint Config</Btn>}
     </div>}
 
     {/* Alarm Config */}
@@ -337,7 +271,7 @@ function L2ConfigPanel({ l2Config, onUpdate, t, disabled }) {
       {(cfg.alarms||[]).map(a => <AlarmConfigRow key={a.id} alarm={a} t={t} disabled={disabled}
         onUpdate={u => onUpdate({ ...cfg, alarms:cfg.alarms.map(x => x.id===a.id?u:x) })}
         onDelete={id => onUpdate({ ...cfg, alarms:cfg.alarms.filter(x => x.id!==id) })} />)}
-      {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addAlarm} style={{marginTop:8}}><Plus size={12}/>Add Alarm</MBRBtn>}
+      {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addAlarm} style={{marginTop:8}}><Plus size={12}/>Add Alarm</Btn>}
     </div>}
 
     {/* Historian Tags */}
@@ -346,7 +280,7 @@ function L2ConfigPanel({ l2Config, onUpdate, t, disabled }) {
       {(cfg.historian_tags||[]).map(ht => <HistorianTagRow key={ht.id} htag={ht} t={t} disabled={disabled}
         onUpdate={u => onUpdate({ ...cfg, historian_tags:cfg.historian_tags.map(x => x.id===ht.id?u:x) })}
         onDelete={id => onUpdate({ ...cfg, historian_tags:cfg.historian_tags.filter(x => x.id!==id) })} />)}
-      {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addHist} style={{marginTop:8}}><Plus size={12}/>Add Historian Tag</MBRBtn>}
+      {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addHist} style={{marginTop:8}}><Plus size={12}/>Add Historian Tag</Btn>}
     </div>}
   </div>;
 }
@@ -360,10 +294,10 @@ const IPC_FREQUENCIES = ['Start of batch', 'End of step', 'Every 15 min', 'Every
 
 function IPCCheckRow({ check, onUpdate, onDelete, t, disabled }) {
   return <div style={{ display:'grid', gridTemplateColumns:'1.5fr 0.8fr 1.2fr 0.8fr auto', gap:8, alignItems:'end', padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
-    <MBRInput label="Check Name" t={t} value={check.check_name} onChange={e => onUpdate({ ...check, check_name:e.target.value })} disabled={disabled} placeholder="e.g. Blend Uniformity" />
-    <MBRSelect label="Type" t={t} value={check.check_type} onChange={e => onUpdate({ ...check, check_type:e.target.value })} options={IPC_CHECK_TYPES} disabled={disabled} />
-    <MBRInput label="Specification" t={t} value={check.specification} onChange={e => onUpdate({ ...check, specification:e.target.value })} disabled={disabled} placeholder="e.g. RSD ≤ 5%" />
-    <MBRSelect label="Frequency" t={t} value={check.frequency} onChange={e => onUpdate({ ...check, frequency:e.target.value })} options={IPC_FREQUENCIES} disabled={disabled} />
+    <Input label="Check Name" t={t} value={check.check_name} onChange={v => onUpdate({ ...check, check_name:v })} disabled={disabled} placeholder="e.g. Blend Uniformity" />
+    <Select label="Type" t={t} value={check.check_type} onChange={v => onUpdate({ ...check, check_type:v })} options={IPC_CHECK_TYPES} disabled={disabled} />
+    <Input label="Specification" t={t} value={check.specification} onChange={v => onUpdate({ ...check, specification:v })} disabled={disabled} placeholder="e.g. RSD ≤ 5%" />
+    <Select label="Frequency" t={t} value={check.frequency} onChange={v => onUpdate({ ...check, frequency:v })} options={IPC_FREQUENCIES} disabled={disabled} />
     {!disabled && <button onClick={() => onDelete(check.id)} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4, paddingBottom:14 }}><Trash2 size={13}/></button>}
   </div>;
 }
@@ -383,24 +317,24 @@ function YieldRulePanel({ yieldConfig, onUpdate, t, disabled }) {
       <span style={{ fontSize:11, fontWeight:600, color:t.info, textTransform:'uppercase', letterSpacing:0.5 }}>Yield Calculation Rules</span>
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginBottom:10 }}>
-      <MBRInput label="Theoretical Yield Formula" t={t} value={cfg.theoretical_formula} onChange={e => onUpdate({ ...cfg, theoretical_formula:e.target.value })} disabled={disabled} placeholder="e.g. batch_size × 0.97" style={{ gridColumn:'span 2' }} />
-      <MBRInput label="Expected Yield" t={t} value={cfg.expected_yield_pct} onChange={e => onUpdate({ ...cfg, expected_yield_pct:e.target.value })} disabled={disabled} type="number" unit="%" placeholder="97" />
+      <Input label="Theoretical Yield Formula" t={t} value={cfg.theoretical_formula} onChange={v => onUpdate({ ...cfg, theoretical_formula:v })} disabled={disabled} placeholder="e.g. batch_size × 0.97" style={{ gridColumn:'span 2' }} />
+      <Input label="Expected Yield" t={t} value={cfg.expected_yield_pct} onChange={v => onUpdate({ ...cfg, expected_yield_pct:v })} disabled={disabled} type="number" unit="%" placeholder="97" />
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
-        <MBRInput label="Low Limit" t={t} value={cfg.acceptable_range_low} onChange={e => onUpdate({ ...cfg, acceptable_range_low:e.target.value })} disabled={disabled} type="number" unit="%" placeholder="95" />
-        <MBRInput label="High Limit" t={t} value={cfg.acceptable_range_high} onChange={e => onUpdate({ ...cfg, acceptable_range_high:e.target.value })} disabled={disabled} type="number" unit="%" placeholder="102" />
+        <Input label="Low Limit" t={t} value={cfg.acceptable_range_low} onChange={v => onUpdate({ ...cfg, acceptable_range_low:v })} disabled={disabled} type="number" unit="%" placeholder="95" />
+        <Input label="High Limit" t={t} value={cfg.acceptable_range_high} onChange={v => onUpdate({ ...cfg, acceptable_range_high:v })} disabled={disabled} type="number" unit="%" placeholder="102" />
       </div>
     </div>
     {/* Reconciliation line items */}
     <div style={{ fontSize:10, color:t.textDim, textTransform:'uppercase', letterSpacing:0.5, marginBottom:6 }}>Yield Reconciliation Items</div>
     {(cfg.reconciliation_items||[]).map(item => (
       <div key={item.id} style={{ display:'grid', gridTemplateColumns:'1.5fr 0.7fr 1fr auto', gap:8, alignItems:'end', padding:'6px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
-        <MBRInput label="Line Item" t={t} value={item.line_item} onChange={e => onUpdate({ ...cfg, reconciliation_items:cfg.reconciliation_items.map(x => x.id===item.id?{...item,line_item:e.target.value}:x) })} disabled={disabled} placeholder="e.g. Finished Tablets, Samples, Waste" />
-        <MBRSelect label="Category" t={t} value={item.category} onChange={e => onUpdate({ ...cfg, reconciliation_items:cfg.reconciliation_items.map(x => x.id===item.id?{...item,category:e.target.value}:x) })} options={['Input','Output','Loss','Retained','Sample','Waste']} disabled={disabled} />
-        <MBRInput label="Formula / Qty" t={t} value={item.formula} onChange={e => onUpdate({ ...cfg, reconciliation_items:cfg.reconciliation_items.map(x => x.id===item.id?{...item,formula:e.target.value}:x) })} disabled={disabled} placeholder="e.g. weigh at end" />
+        <Input label="Line Item" t={t} value={item.line_item} onChange={v => onUpdate({ ...cfg, reconciliation_items:cfg.reconciliation_items.map(x => x.id===item.id?{...item,line_item:v}:x) })} disabled={disabled} placeholder="e.g. Finished Tablets, Samples, Waste" />
+        <Select label="Category" t={t} value={item.category} onChange={v => onUpdate({ ...cfg, reconciliation_items:cfg.reconciliation_items.map(x => x.id===item.id?{...item,category:v}:x) })} options={['Input','Output','Loss','Retained','Sample','Waste']} disabled={disabled} />
+        <Input label="Formula / Qty" t={t} value={item.formula} onChange={v => onUpdate({ ...cfg, reconciliation_items:cfg.reconciliation_items.map(x => x.id===item.id?{...item,formula:v}:x) })} disabled={disabled} placeholder="e.g. weigh at end" />
         {!disabled && <button onClick={() => onUpdate({ ...cfg, reconciliation_items:cfg.reconciliation_items.filter(x => x.id!==item.id) })} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4, paddingBottom:14 }}><Trash2 size={13}/></button>}
       </div>
     ))}
-    {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addReconItem} style={{marginTop:6}}><Plus size={12}/>Add Reconciliation Item</MBRBtn>}
+    {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addReconItem} style={{marginTop:6}}><Plus size={12}/>Add Reconciliation Item</Btn>}
   </div>;
 }
 
@@ -445,12 +379,12 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit, onBatchS
     <SectionTitle icon={Package} title="Bill of Materials (BOM)" count={items.length} t={t}
       right={<div style={{ display:'flex', alignItems:'center', gap:10 }}>
         <span style={{ fontSize:10, fontFamily:"'DM Mono',monospace", color:t.textDim }}>Total: {totalQty.toFixed(2)} {batchUnit||'kg'} / {batchSize||'—'} {batchUnit||'kg'} batch</span>
-        {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={() => setShowScale(!showScale)}><ArrowUpDown size={12}/>Scale BOM</MBRBtn>}
-        {!disabled && <MBRBtn t={t} variant="accent" size="sm" onClick={addItem}><Plus size={12}/>Add Material</MBRBtn>}
+        {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={() => setShowScale(!showScale)}><ArrowUpDown size={12}/>Scale BOM</Btn>}
+        {!disabled && <Btn t={t} variant="accent" size="sm" onClick={addItem}><Plus size={12}/>Add Material</Btn>}
       </div>} />
 
     {/* Batch Scaling Panel */}
-    {showScale && <MBRCard t={t} style={{ padding:14, marginBottom:8, borderLeft:'3px solid '+t.accent }}>
+    {showScale && <Card t={t} style={{ padding:14, marginBottom:8, borderLeft:'3px solid '+t.accent }}>
       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
         <ArrowUpDown size={14} color={t.accent}/>
         <span style={{ fontSize:13, fontWeight:700, color:t.text }}>Batch Size Scaling</span>
@@ -459,25 +393,25 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit, onBatchS
       <div style={{ display:'grid', gridTemplateColumns:'1fr auto 1fr auto', gap:10, alignItems:'end' }}>
         <div>
           <label style={{ color:t.textDim, fontSize:10, fontWeight:600, textTransform:'uppercase', display:'block', marginBottom:3 }}>Current batch size</label>
-          <input value={refBatchSize || batchSize || ''} onChange={e => setRefBatchSize(e.target.value)} type="number"
+          <input value={refBatchSize || batchSize || ''} onChange={v => setRefBatchSize(v)} type="number"
             style={{ width:'100%', boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:"'DM Mono',monospace" }}/>
         </div>
         <span style={{ fontSize:16, color:t.textMuted, paddingBottom:8 }}>→</span>
         <div>
           <label style={{ color:t.textDim, fontSize:10, fontWeight:600, textTransform:'uppercase', display:'block', marginBottom:3 }}>New batch size ({batchUnit||'kg'})</label>
-          <input value={newBatchSize} onChange={e => setNewBatchSize(e.target.value)} type="number" placeholder="Enter target size" autoFocus
+          <input value={newBatchSize} onChange={v => setNewBatchSize(v)} type="number" placeholder="Enter target size" autoFocus
             style={{ width:'100%', boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:"'DM Mono',monospace" }}/>
         </div>
         <div style={{ display:'flex', gap:6, paddingBottom:1 }}>
-          <MBRBtn t={t} variant="primary" size="sm" onClick={handleScale} disabled={!newBatchSize || !parseFloat(newBatchSize)}>
+          <Btn t={t} variant="primary" size="sm" onClick={handleScale} disabled={!newBatchSize || !parseFloat(newBatchSize)}>
             Apply {newBatchSize && refBatchSize ? `(${(parseFloat(newBatchSize)/parseFloat(refBatchSize||batchSize)).toFixed(2)}x)` : ''}
-          </MBRBtn>
-          <MBRBtn t={t} variant="ghost" size="sm" onClick={() => setShowScale(false)}>Cancel</MBRBtn>
+          </Btn>
+          <Btn t={t} variant="ghost" size="sm" onClick={() => setShowScale(false)}>Cancel</Btn>
         </div>
       </div>
-    </MBRCard>}
+    </Card>}
 
-    <MBRCard t={t} style={{ padding:'14px 10px', overflowX:'auto' }}>
+    <Card t={t} style={{ padding:'14px 10px', overflowX:'auto' }}>
       {items.length === 0 ? (
         <div style={{ textAlign:'center', padding:'30px 0', color:t.textMuted, fontSize:13 }}>
           <Package size={24} color={t.textMuted} style={{marginBottom:8}}/>
@@ -500,7 +434,7 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit, onBatchS
               <div style={{ display:'flex', alignItems:'center', gap:4, overflow:'hidden' }}>
                 <input value={item.material_name} onChange={e => onUpdate(items.map(x => x.id===item.id?{...item,material_name:e.target.value}:x))} disabled={disabled} placeholder="Material Name" title={item.material_name}
                   style={{ flex:1, minWidth:0, background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:5, padding:'5px 7px', fontSize:11, outline:'none', textOverflow:'ellipsis' }} />
-                {item.is_active_ingredient && <MBRBadge color={t.danger} t={t}>API</MBRBadge>}
+                {item.is_active_ingredient && <Badge color={t.danger} t={t}>API</Badge>}
               </div>
               <input value={item.quantity_per_batch} onChange={e => onUpdate(items.map(x => x.id===item.id?{...item,quantity_per_batch:e.target.value}:x))} disabled={disabled} type="number" placeholder="100"
                 style={{ background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:5, padding:'5px 7px', fontSize:11, outline:'none', fontFamily:"'DM Mono',monospace", textAlign:'right' }} />
@@ -533,7 +467,7 @@ function BOMSection({ bom, onUpdate, t, disabled, batchSize, batchUnit, onBatchS
           </div>
         </div>
       )}
-    </MBRCard>
+    </Card>
   </div>;
 }
 
@@ -562,36 +496,36 @@ function WeighingInstructionPanel({ weighConfig, onUpdate, t, disabled }) {
       <span style={{ fontSize:10, color:t.textMuted, marginLeft:'auto' }}>{cfg.instructions.length} items</span>
     </div>
     {(cfg.instructions||[]).map((inst, idx) => (
-      <MBRCard key={inst.id} t={t} style={{ padding:12, marginBottom:8, borderLeft:'3px solid '+t.warning+'40' }}>
+      <Card key={inst.id} t={t} style={{ padding:12, marginBottom:8, borderLeft:'3px solid '+t.warning+'40' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
           <span style={{ fontSize:12, fontWeight:700, color:t.text }}>Step {inst.sequence}: {inst.material_ref || 'Material'}</span>
           <div style={{ display:'flex', gap:4, alignItems:'center' }}>
-            {inst.potent_compound && <MBRBadge color={t.danger} t={t}>POTENT</MBRBadge>}
+            {inst.potent_compound && <Badge color={t.danger} t={t}>POTENT</Badge>}
             {!disabled && <button onClick={() => onUpdate({ ...cfg, instructions:cfg.instructions.filter(x => x.id!==inst.id) })} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted }}><Trash2 size={12}/></button>}
           </div>
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1.5fr 0.7fr 0.5fr 0.5fr 1fr', gap:8 }}>
-          <MBRInput label="Material Reference" t={t} value={inst.material_ref} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,material_ref:e.target.value}:x) })} disabled={disabled} placeholder="Metformin HCl API" />
-          <MBRInput label="Target Weight" t={t} value={inst.target_weight} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,target_weight:e.target.value}:x) })} disabled={disabled} type="number" unit={inst.unit} />
-          <MBRInput label="Tolerance" t={t} value={inst.tolerance_pct} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,tolerance_pct:e.target.value}:x) })} disabled={disabled} unit="%" />
-          <MBRInput label="Scale ID" t={t} value={inst.scale_id} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,scale_id:e.target.value}:x) })} disabled={disabled} placeholder="BAL-001" />
-          <MBRSelect label="Method" t={t} value={inst.method} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,method:e.target.value}:x) })} options={DISPENSING_METHODS} disabled={disabled} />
+          <Input label="Material Reference" t={t} value={inst.material_ref} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,material_ref:v}:x) })} disabled={disabled} placeholder="Metformin HCl API" />
+          <Input label="Target Weight" t={t} value={inst.target_weight} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,target_weight:v}:x) })} disabled={disabled} type="number" unit={inst.unit} />
+          <Input label="Tolerance" t={t} value={inst.tolerance_pct} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,tolerance_pct:v}:x) })} disabled={disabled} unit="%" />
+          <Input label="Scale ID" t={t} value={inst.scale_id} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,scale_id:v}:x) })} disabled={disabled} placeholder="BAL-001" />
+          <Select label="Method" t={t} value={inst.method} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,method:v}:x) })} options={DISPENSING_METHODS} disabled={disabled} />
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:8, marginTop:4 }}>
-          <MBRSelect label="Verification" t={t} value={inst.verification} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,verification:e.target.value}:x) })} options={VERIFICATION_TYPES} disabled={disabled} />
-          <MBRSelect label="Tare Method" t={t} value={inst.tare_method} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,tare_method:e.target.value}:x) })} options={TARE_METHODS} disabled={disabled} />
-          <MBRInput label="Container Type" t={t} value={inst.container_type} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,container_type:e.target.value}:x) })} disabled={disabled} placeholder="SS Drum, PE Bag" />
-          <MBRInput label="PPE Required" t={t} value={inst.ppe_required} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,ppe_required:e.target.value}:x) })} disabled={disabled} placeholder="Gloves, Mask" />
+          <Select label="Verification" t={t} value={inst.verification} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,verification:v}:x) })} options={VERIFICATION_TYPES} disabled={disabled} />
+          <Select label="Tare Method" t={t} value={inst.tare_method} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,tare_method:v}:x) })} options={TARE_METHODS} disabled={disabled} />
+          <Input label="Container Type" t={t} value={inst.container_type} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,container_type:v}:x) })} disabled={disabled} placeholder="SS Drum, PE Bag" />
+          <Input label="PPE Required" t={t} value={inst.ppe_required} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,ppe_required:v}:x) })} disabled={disabled} placeholder="Gloves, Mask" />
         </div>
         <div style={{ marginTop:4 }}>
-          <MBRInput label="Special Instructions" t={t} value={inst.special_instructions} onChange={e => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,special_instructions:e.target.value}:x) })} disabled={disabled} placeholder="e.g. Dispense under LAF, double-bag potent compound" />
+          <Input label="Special Instructions" t={t} value={inst.special_instructions} onChange={v => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,special_instructions:v}:x) })} disabled={disabled} placeholder="e.g. Dispense under LAF, double-bag potent compound" />
         </div>
         <div style={{ marginTop:4, display:'flex', gap:6 }}>
           <ToggleChip label="Potent Compound" active={inst.potent_compound} onClick={() => onUpdate({ ...cfg, instructions:cfg.instructions.map(x => x.id===inst.id?{...inst,potent_compound:!inst.potent_compound}:x) })} color={t.danger} t={t} />
         </div>
-      </MBRCard>
+      </Card>
     ))}
-    {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addInstruction} style={{marginTop:6}}><Plus size={12}/>Add Weighing Instruction</MBRBtn>}
+    {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addInstruction} style={{marginTop:6}}><Plus size={12}/>Add Weighing Instruction</Btn>}
   </div>;
 }
 
@@ -623,19 +557,19 @@ function SamplingPlanPanel({ samplingPlan, onUpdate, t, disabled }) {
     {(plan.samples||[]).map(sample => (
       <div key={sample.id} style={{ padding:'8px 0', borderBottom:'1px solid '+t.cardBorder+'30' }}>
         <div style={{ display:'grid', gridTemplateColumns:'1.5fr 0.8fr 0.5fr 0.4fr 0.8fr 0.8fr auto', gap:8, alignItems:'end' }}>
-          <MBRInput label="Sample Name" t={t} value={sample.sample_name} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,sample_name:e.target.value}:x) })} disabled={disabled} placeholder="Blend Uniformity Sample" />
-          <MBRSelect label="Type" t={t} value={sample.sample_type} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,sample_type:e.target.value}:x) })} options={SAMPLE_TYPES} disabled={disabled} />
-          <MBRInput label="Qty" t={t} value={sample.quantity} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,quantity:e.target.value}:x) })} disabled={disabled} type="number" unit={sample.unit} />
-          <MBRSelect label="Location" t={t} value={sample.location} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,location:e.target.value}:x) })} options={SAMPLE_LOCATIONS} disabled={disabled} />
-          <MBRInput label="Test Method" t={t} value={sample.test_method} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,test_method:e.target.value}:x) })} disabled={disabled} placeholder="USP <905>" />
-          <MBRInput label="Specification" t={t} value={sample.specification} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,specification:e.target.value}:x) })} disabled={disabled} placeholder="RSD ≤ 5%" />
+          <Input label="Sample Name" t={t} value={sample.sample_name} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,sample_name:v}:x) })} disabled={disabled} placeholder="Blend Uniformity Sample" />
+          <Select label="Type" t={t} value={sample.sample_type} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,sample_type:v}:x) })} options={SAMPLE_TYPES} disabled={disabled} />
+          <Input label="Qty" t={t} value={sample.quantity} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,quantity:v}:x) })} disabled={disabled} type="number" unit={sample.unit} />
+          <Select label="Location" t={t} value={sample.location} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,location:v}:x) })} options={SAMPLE_LOCATIONS} disabled={disabled} />
+          <Input label="Test Method" t={t} value={sample.test_method} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,test_method:v}:x) })} disabled={disabled} placeholder="USP <905>" />
+          <Input label="Specification" t={t} value={sample.specification} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,specification:v}:x) })} disabled={disabled} placeholder="RSD ≤ 5%" />
           {!disabled && <button onClick={() => onUpdate({ ...plan, samples:plan.samples.filter(x => x.id!==sample.id) })} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, paddingBottom:14 }}><Trash2 size={13}/></button>}
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr auto', gap:8, marginTop:4, alignItems:'end' }}>
-          <MBRSelect label="Container" t={t} value={sample.container} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,container:e.target.value}:x) })} options={SAMPLE_CONTAINERS} disabled={disabled} />
-          <MBRSelect label="Destination" t={t} value={sample.destination} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,destination:e.target.value}:x) })} options={SAMPLE_DESTINATIONS} disabled={disabled} />
-          <MBRInput label="Storage" t={t} value={sample.storage_conditions} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,storage_conditions:e.target.value}:x) })} disabled={disabled} placeholder="2-8°C" />
-          <MBRInput label="Hold Time" t={t} value={sample.hold_time_hours} onChange={e => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,hold_time_hours:e.target.value}:x) })} disabled={disabled} type="number" unit="hrs" />
+          <Select label="Container" t={t} value={sample.container} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,container:v}:x) })} options={SAMPLE_CONTAINERS} disabled={disabled} />
+          <Select label="Destination" t={t} value={sample.destination} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,destination:v}:x) })} options={SAMPLE_DESTINATIONS} disabled={disabled} />
+          <Input label="Storage" t={t} value={sample.storage_conditions} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,storage_conditions:v}:x) })} disabled={disabled} placeholder="2-8°C" />
+          <Input label="Hold Time" t={t} value={sample.hold_time_hours} onChange={v => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,hold_time_hours:v}:x) })} disabled={disabled} type="number" unit="hrs" />
           <div style={{ display:'flex', gap:4, paddingBottom:12 }}>
             <ToggleChip label="Retain" active={sample.is_retain} onClick={() => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,is_retain:!sample.is_retain}:x) })} color={t.info} t={t} />
             <ToggleChip label="Stability" active={sample.is_stability} onClick={() => onUpdate({ ...plan, samples:plan.samples.map(x => x.id===sample.id?{...sample,is_stability:!sample.is_stability}:x) })} color={t.warning} t={t} />
@@ -643,7 +577,7 @@ function SamplingPlanPanel({ samplingPlan, onUpdate, t, disabled }) {
         </div>
       </div>
     ))}
-    {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addSample} style={{marginTop:6}}><Plus size={12}/>Add Sample</MBRBtn>}
+    {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addSample} style={{marginTop:6}}><Plus size={12}/>Add Sample</Btn>}
   </div>;
 }
 
@@ -670,27 +604,27 @@ function HoldTimePanel({ holdConfig, onUpdate, t, disabled }) {
       <span style={{ fontSize:11, fontWeight:600, color:t.danger, textTransform:'uppercase', letterSpacing:0.5 }}>Clean / Dirty Hold Times & Cleaning Requirements</span>
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10 }}>
-      <MBRInput label="Dirty Hold Max" t={t} value={cfg.dirty_hold_max_hours} onChange={e => set('dirty_hold_max_hours',e.target.value)} disabled={disabled} type="number" unit="hours" placeholder="24" />
-      <MBRInput label="Clean Hold Max" t={t} value={cfg.clean_hold_max_hours} onChange={e => set('clean_hold_max_hours',e.target.value)} disabled={disabled} type="number" unit="hours" placeholder="72" />
-      <MBRInput label="Campaign Max" t={t} value={cfg.campaign_max_batches} onChange={e => set('campaign_max_batches',e.target.value)} disabled={disabled} type="number" unit="batches" placeholder="5" />
-      <MBRSelect label="Cleaning Type" t={t} value={cfg.cleaning_type} onChange={e => set('cleaning_type',e.target.value)} options={CLEANING_TYPES} disabled={disabled} />
+      <Input label="Dirty Hold Max" t={t} value={cfg.dirty_hold_max_hours} onChange={v => set('dirty_hold_max_hours',v)} disabled={disabled} type="number" unit="hours" placeholder="24" />
+      <Input label="Clean Hold Max" t={t} value={cfg.clean_hold_max_hours} onChange={v => set('clean_hold_max_hours',v)} disabled={disabled} type="number" unit="hours" placeholder="72" />
+      <Input label="Campaign Max" t={t} value={cfg.campaign_max_batches} onChange={v => set('campaign_max_batches',v)} disabled={disabled} type="number" unit="batches" placeholder="5" />
+      <Select label="Cleaning Type" t={t} value={cfg.cleaning_type} onChange={v => set('cleaning_type',v)} options={CLEANING_TYPES} disabled={disabled} />
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginTop:4 }}>
-      <MBRInput label="Cleaning SOP" t={t} value={cfg.cleaning_sop} onChange={e => set('cleaning_sop',e.target.value)} disabled={disabled} placeholder="SOP-CLN-001" />
-      <MBRInput label="Cleaning Agent" t={t} value={cfg.cleaning_agent} onChange={e => set('cleaning_agent',e.target.value)} disabled={disabled} placeholder="0.5N NaOH" />
-      <MBRInput label="Rinse Solvent" t={t} value={cfg.rinse_solvent} onChange={e => set('rinse_solvent',e.target.value)} disabled={disabled} placeholder="Purified Water USP" />
-      <MBRInput label="Cleaning Validation" t={t} value={cfg.cleaning_validation_ref} onChange={e => set('cleaning_validation_ref',e.target.value)} disabled={disabled} placeholder="CV-001" />
+      <Input label="Cleaning SOP" t={t} value={cfg.cleaning_sop} onChange={v => set('cleaning_sop',v)} disabled={disabled} placeholder="SOP-CLN-001" />
+      <Input label="Cleaning Agent" t={t} value={cfg.cleaning_agent} onChange={v => set('cleaning_agent',v)} disabled={disabled} placeholder="0.5N NaOH" />
+      <Input label="Rinse Solvent" t={t} value={cfg.rinse_solvent} onChange={v => set('rinse_solvent',v)} disabled={disabled} placeholder="Purified Water USP" />
+      <Input label="Cleaning Validation" t={t} value={cfg.cleaning_validation_ref} onChange={v => set('cleaning_validation_ref',v)} disabled={disabled} placeholder="CV-001" />
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginTop:4 }}>
-      <MBRInput label="TOC Limit" t={t} value={cfg.toc_limit} onChange={e => set('toc_limit',e.target.value)} disabled={disabled} placeholder="500 ppb" />
-      <MBRInput label="Residue Limit" t={t} value={cfg.residue_limit} onChange={e => set('residue_limit',e.target.value)} disabled={disabled} placeholder="10 ppm" />
+      <Input label="TOC Limit" t={t} value={cfg.toc_limit} onChange={v => set('toc_limit',v)} disabled={disabled} placeholder="500 ppb" />
+      <Input label="Residue Limit" t={t} value={cfg.residue_limit} onChange={v => set('residue_limit',v)} disabled={disabled} placeholder="10 ppm" />
       <div style={{ display:'flex', gap:6, alignItems:'end', paddingBottom:12, flexWrap:'wrap' }}>
         <ToggleChip label="Swab Test" active={cfg.swab_test_required} onClick={() => set('swab_test_required',!cfg.swab_test_required)} color={t.info} t={t} />
         <ToggleChip label="Rinse Test" active={cfg.rinse_test_required} onClick={() => set('rinse_test_required',!cfg.rinse_test_required)} color={t.info} t={t} />
         <ToggleChip label="Visual Check" active={cfg.visual_inspection} onClick={() => set('visual_inspection',!cfg.visual_inspection)} t={t} />
       </div>
     </div>
-    <MBRInput label="Additional Notes" t={t} value={cfg.notes} onChange={e => set('notes',e.target.value)} disabled={disabled} placeholder="e.g. Dedicated equipment — no product changeover cleaning required" />
+    <Input label="Additional Notes" t={t} value={cfg.notes} onChange={v => set('notes',v)} disabled={disabled} placeholder="e.g. Dedicated equipment — no product changeover cleaning required" />
   </div>;
 }
 
@@ -719,29 +653,29 @@ function RoomEnvironmentPanel({ envConfig, onUpdate, t, disabled }) {
       <span style={{ fontSize:11, fontWeight:600, color:'#a78bfa', textTransform:'uppercase', letterSpacing:0.5 }}>Room & Environmental Requirements</span>
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10 }}>
-      <MBRInput label="Room Number" t={t} value={cfg.room_number} onChange={e => set('room_number',e.target.value)} disabled={disabled} placeholder="RM-201" />
-      <MBRInput label="Room Name" t={t} value={cfg.room_name} onChange={e => set('room_name',e.target.value)} disabled={disabled} placeholder="Granulation Suite" />
-      <MBRSelect label="Clean Room Class" t={t} value={cfg.clean_room_class} onChange={e => set('clean_room_class',e.target.value)} options={CLEAN_ROOM_CLASSES} disabled={disabled} />
-      <MBRSelect label="Gowning Level" t={t} value={cfg.gowning_level} onChange={e => set('gowning_level',e.target.value)} options={GOWNING_LEVELS} disabled={disabled} />
+      <Input label="Room Number" t={t} value={cfg.room_number} onChange={v => set('room_number',v)} disabled={disabled} placeholder="RM-201" />
+      <Input label="Room Name" t={t} value={cfg.room_name} onChange={v => set('room_name',v)} disabled={disabled} placeholder="Granulation Suite" />
+      <Select label="Clean Room Class" t={t} value={cfg.clean_room_class} onChange={v => set('clean_room_class',v)} options={CLEAN_ROOM_CLASSES} disabled={disabled} />
+      <Select label="Gowning Level" t={t} value={cfg.gowning_level} onChange={v => set('gowning_level',v)} options={GOWNING_LEVELS} disabled={disabled} />
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr', gap:10, marginTop:4 }}>
-      <MBRInput label="Temp Min" t={t} value={cfg.temp_min} onChange={e => set('temp_min',e.target.value)} disabled={disabled} type="number" unit={cfg.temp_unit} placeholder="18" />
-      <MBRInput label="Temp Max" t={t} value={cfg.temp_max} onChange={e => set('temp_max',e.target.value)} disabled={disabled} type="number" unit={cfg.temp_unit} placeholder="25" />
-      <MBRInput label="RH Min" t={t} value={cfg.humidity_min} onChange={e => set('humidity_min',e.target.value)} disabled={disabled} type="number" unit="%" placeholder="30" />
-      <MBRInput label="RH Max" t={t} value={cfg.humidity_max} onChange={e => set('humidity_max',e.target.value)} disabled={disabled} type="number" unit="%" placeholder="65" />
-      <MBRInput label="ΔP" t={t} value={cfg.differential_pressure} onChange={e => set('differential_pressure',e.target.value)} disabled={disabled} type="number" unit={cfg.dp_unit} placeholder="15" />
+      <Input label="Temp Min" t={t} value={cfg.temp_min} onChange={v => set('temp_min',v)} disabled={disabled} type="number" unit={cfg.temp_unit} placeholder="18" />
+      <Input label="Temp Max" t={t} value={cfg.temp_max} onChange={v => set('temp_max',v)} disabled={disabled} type="number" unit={cfg.temp_unit} placeholder="25" />
+      <Input label="RH Min" t={t} value={cfg.humidity_min} onChange={v => set('humidity_min',v)} disabled={disabled} type="number" unit="%" placeholder="30" />
+      <Input label="RH Max" t={t} value={cfg.humidity_max} onChange={v => set('humidity_max',v)} disabled={disabled} type="number" unit="%" placeholder="65" />
+      <Input label="ΔP" t={t} value={cfg.differential_pressure} onChange={v => set('differential_pressure',v)} disabled={disabled} type="number" unit={cfg.dp_unit} placeholder="15" />
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginTop:4 }}>
-      <MBRInput label="Air Changes/Hr" t={t} value={cfg.air_changes_per_hour} onChange={e => set('air_changes_per_hour',e.target.value)} disabled={disabled} type="number" unit="ACH" placeholder="20" />
-      <MBRInput label="Lighting" t={t} value={cfg.lighting_lux} onChange={e => set('lighting_lux',e.target.value)} disabled={disabled} type="number" unit="lux" placeholder="500" />
-      <MBRInput label="Monitoring Freq" t={t} value={cfg.monitoring_frequency} onChange={e => set('monitoring_frequency',e.target.value)} disabled={disabled} placeholder="Continuous / Hourly" />
+      <Input label="Air Changes/Hr" t={t} value={cfg.air_changes_per_hour} onChange={v => set('air_changes_per_hour',v)} disabled={disabled} type="number" unit="ACH" placeholder="20" />
+      <Input label="Lighting" t={t} value={cfg.lighting_lux} onChange={v => set('lighting_lux',v)} disabled={disabled} type="number" unit="lux" placeholder="500" />
+      <Input label="Monitoring Freq" t={t} value={cfg.monitoring_frequency} onChange={v => set('monitoring_frequency',v)} disabled={disabled} placeholder="Continuous / Hourly" />
       <div style={{ display:'flex', gap:6, alignItems:'end', paddingBottom:12 }}>
         <ToggleChip label="EMS Monitoring" active={cfg.monitoring_required} onClick={() => set('monitoring_required',!cfg.monitoring_required)} t={t} />
       </div>
     </div>
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:4 }}>
-      <MBRInput label="Special Requirements" t={t} value={cfg.special_requirements} onChange={e => set('special_requirements',e.target.value)} disabled={disabled} placeholder="e.g. Anti-static flooring, explosion-proof area" />
-      <MBRInput label="Access Restrictions" t={t} value={cfg.access_restrictions} onChange={e => set('access_restrictions',e.target.value)} disabled={disabled} placeholder="e.g. Qualified operators only, gown-in required" />
+      <Input label="Special Requirements" t={t} value={cfg.special_requirements} onChange={v => set('special_requirements',v)} disabled={disabled} placeholder="e.g. Anti-static flooring, explosion-proof area" />
+      <Input label="Access Restrictions" t={t} value={cfg.access_restrictions} onChange={v => set('access_restrictions',v)} disabled={disabled} placeholder="e.g. Qualified operators only, gown-in required" />
     </div>
   </div>;
 }
@@ -776,7 +710,7 @@ function ProcessFlowDiagram({ phases, t, onSelectPhase }) {
   const totalRows = Math.ceil(nodes.length / rowMaxNodes);
   const totalH = totalRows * (nodeH + rowGapY) + startY + 10;
 
-  return <MBRCard t={t} style={{ marginBottom:16, padding:14, overflowX:'auto' }}>
+  return <Card t={t} style={{ marginBottom:16, padding:14, overflowX:'auto' }}>
     <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
       <Activity size={14} color={t.accent}/>
       <span style={{ fontSize:12, fontWeight:700, color:t.text, textTransform:'uppercase', letterSpacing:0.5 }}>Process Flow Diagram</span>
@@ -827,7 +761,7 @@ function ProcessFlowDiagram({ phases, t, onSelectPhase }) {
         </g>
       ))}
     </svg>
-  </MBRCard>;
+  </Card>;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -868,11 +802,11 @@ function OperationCard({ step, onUpdate, onDelete, t, disabled, dragHandleProps 
       <input value={step.step_name} onChange={e => { e.stopPropagation(); onUpdate({ ...step, step_name:e.target.value }); }} onClick={e => e.stopPropagation()} disabled={disabled}
         placeholder="Operation name..." style={{ flex:1, background:'transparent', border:'none', color:t.text, fontSize:13, fontWeight:600, outline:'none', opacity:disabled?0.6:1 }} />
       <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-        <MBRBadge color={t.textMuted} t={t}>{step.step_type}</MBRBadge>
-        {step.is_critical && <MBRBadge color={t.danger} t={t}>CPP</MBRBadge>}
-        {step.is_gmp_critical && <MBRBadge color={t.warning} t={t}>GMP</MBRBadge>}
-        {l2Count > 0 && <MBRBadge color={t.info} t={t}><Radio size={9}/>L2:{l2Count}</MBRBadge>}
-        {(step.ipc_checks?.length||0) > 0 && <MBRBadge color={t.success} t={t}><ClipboardCheck size={9}/>{step.ipc_checks.length} IPC</MBRBadge>}
+        <Badge color={t.textMuted} t={t}>{step.step_type}</Badge>
+        {step.is_critical && <Badge color={t.danger} t={t}>CPP</Badge>}
+        {step.is_gmp_critical && <Badge color={t.warning} t={t}>GMP</Badge>}
+        {l2Count > 0 && <Badge color={t.info} t={t}><Radio size={9}/>L2:{l2Count}</Badge>}
+        {(step.ipc_checks?.length||0) > 0 && <Badge color={t.success} t={t}><ClipboardCheck size={9}/>{step.ipc_checks.length} IPC</Badge>}
         {step.duration_min && <span style={{ fontSize:10, color:t.textMuted, fontFamily:"'DM Mono',monospace", display:'flex', alignItems:'center', gap:3 }}><Clock size={10}/>{step.duration_min}m</span>}
         {expanded ? <ChevronUp size={15} color={t.textMuted}/> : <ChevronDown size={15} color={t.textMuted}/>}
       </div>
@@ -882,21 +816,21 @@ function OperationCard({ step, onUpdate, onDelete, t, disabled, dragHandleProps 
     {expanded && <div style={{ padding:'0 14px 14px', borderTop:'1px solid '+t.cardBorder+'40' }}>
       {/* Operation details */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginTop:12 }}>
-        <MBRSelect label="Operation Type" t={t} value={step.step_type} onChange={e => onUpdate({ ...step, step_type:e.target.value })} options={STEP_TYPES} disabled={disabled} />
-        <MBRInput label="Duration" t={t} value={step.duration_min} onChange={e => onUpdate({ ...step, duration_min:e.target.value })} type="number" unit="min" disabled={disabled} />
+        <Select label="Operation Type" t={t} value={step.step_type} onChange={v => onUpdate({ ...step, step_type:v })} options={STEP_TYPES} disabled={disabled} />
+        <Input label="Duration" t={t} value={step.duration_min} onChange={v => onUpdate({ ...step, duration_min:v })} type="number" unit="min" disabled={disabled} />
         <div style={{ display:'flex', gap:6, alignItems:'end', paddingBottom:12 }}>
           <ToggleChip label="Critical Process" active={step.is_critical} onClick={() => onUpdate({ ...step, is_critical:!step.is_critical })} color={t.danger} t={t} />
           <ToggleChip label="GMP Critical" active={step.is_gmp_critical} onClick={() => onUpdate({ ...step, is_gmp_critical:!step.is_gmp_critical })} color={t.warning} t={t} />
         </div>
         {!disabled && <div style={{ display:'flex', alignItems:'end', paddingBottom:12, justifyContent:'flex-end' }}>
-          <MBRBtn t={t} variant="danger" size="sm" onClick={() => onDelete(step.id)}><Trash2 size={12}/>Remove</MBRBtn>
+          <Btn t={t} variant="danger" size="sm" onClick={() => onDelete(step.id)}><Trash2 size={12}/>Remove</Btn>
         </div>}
       </div>
 
       {/* Instruction */}
       <div style={{ marginTop:4 }}>
         <label style={{ color:t.textDim, fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, marginBottom:4, display:'block' }}>Work Instruction</label>
-        <textarea value={step.instruction||''} onChange={e => onUpdate({ ...step, instruction:e.target.value })} disabled={disabled} rows={2} placeholder="Detailed work instruction for this operation..."
+        <textarea value={step.instruction||''} onChange={v => onUpdate({ ...step, instruction:v })} disabled={disabled} rows={2} placeholder="Detailed work instruction for this operation..."
           style={{ width:'100%', boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:8, padding:'9px 12px', fontSize:13, outline:'none', resize:'none', fontFamily:'inherit' }} />
       </div>
 
@@ -915,26 +849,26 @@ function OperationCard({ step, onUpdate, onDelete, t, disabled, dragHandleProps 
           {(step.parameters||[]).map(p => <ParamRow key={p.id} param={p} t={t} disabled={disabled}
             onUpdate={u => onUpdate({ ...step, parameters:step.parameters.map(x => x.id===p.id?u:x) })}
             onDelete={id => onUpdate({ ...step, parameters:step.parameters.filter(x => x.id!==id) })} />)}
-          {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addParam} style={{marginTop:8}}><Plus size={12}/>Add Parameter</MBRBtn>}
+          {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addParam} style={{marginTop:8}}><Plus size={12}/>Add Parameter</Btn>}
         </div>}
         {activeTab === 'materials' && <div>
           {(step.materials||[]).map(m => <MaterialRow key={m.id} mat={m} t={t} disabled={disabled}
             onUpdate={u => onUpdate({ ...step, materials:step.materials.map(x => x.id===m.id?u:x) })}
             onDelete={id => onUpdate({ ...step, materials:step.materials.filter(x => x.id!==id) })} />)}
-          {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addMat} style={{marginTop:8}}><Plus size={12}/>Add Material</MBRBtn>}
+          {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addMat} style={{marginTop:8}}><Plus size={12}/>Add Material</Btn>}
         </div>}
         {activeTab === 'equipment' && <div>
           {(step.equipment||[]).map(eq => <EquipmentRow key={eq.id} eq={eq} t={t} disabled={disabled}
             onUpdate={u => onUpdate({ ...step, equipment:step.equipment.map(x => x.id===eq.id?u:x) })}
             onDelete={id => onUpdate({ ...step, equipment:step.equipment.filter(x => x.id!==id) })} />)}
-          {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={addEq} style={{marginTop:8}}><Plus size={12}/>Add Equipment</MBRBtn>}
+          {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={addEq} style={{marginTop:8}}><Plus size={12}/>Add Equipment</Btn>}
         </div>}
         {activeTab === 'ipc' && <div>
           <div style={{ fontSize:10, color:t.textMuted, marginBottom:8 }}>Define In-Process Control checks for this operation. These will appear in EBR execution for operators to record.</div>
           {(step.ipc_checks||[]).map(c => <IPCCheckRow key={c.id} check={c} t={t} disabled={disabled}
             onUpdate={u => onUpdate({ ...step, ipc_checks:step.ipc_checks.map(x => x.id===c.id?u:x) })}
             onDelete={id => onUpdate({ ...step, ipc_checks:step.ipc_checks.filter(x => x.id!==id) })} />)}
-          {!disabled && <MBRBtn t={t} variant="ghost" size="sm" onClick={() => onUpdate({ ...step, ipc_checks:[...(step.ipc_checks||[]), { id:createId(), _isNew:true, check_name:'', check_type:'Visual', specification:'', frequency:'Every 30 min' }] })} style={{marginTop:8}}><Plus size={12}/>Add IPC Check</MBRBtn>}
+          {!disabled && <Btn t={t} variant="ghost" size="sm" onClick={() => onUpdate({ ...step, ipc_checks:[...(step.ipc_checks||[]), { id:createId(), _isNew:true, check_name:'', check_type:'Visual', specification:'', frequency:'Every 30 min' }] })} style={{marginTop:8}}><Plus size={12}/>Add IPC Check</Btn>}
         </div>}
         {activeTab === 'yield' && <YieldRulePanel
           yieldConfig={step.yield_config || { theoretical_formula:'', expected_yield_pct:'', acceptable_range_low:'', acceptable_range_high:'', reconciliation_items:[] }}
@@ -997,7 +931,7 @@ function UnitProcedureCard({ phase, onUpdate, onDelete, t, disabled }) {
   const criticalOps = (phase.steps||[]).filter(s => s.is_critical).length;
   const totalParams = (phase.steps||[]).reduce((s, st) => s + (st.parameters?.length||0), 0);
 
-  return <MBRCard t={t} style={{ marginBottom:14, borderLeft:'3px solid '+t.accent, padding:0, overflow:'hidden' }}>
+  return <Card t={t} style={{ marginBottom:14, borderLeft:'3px solid '+t.accent, padding:0, overflow:'hidden' }}>
     {/* Header */}
     <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 18px', background:t.bgAlt+'80', cursor:'pointer', userSelect:'none', borderBottom:'1px solid '+t.cardBorder+'40' }}
       onClick={() => setCollapsed(!collapsed)}>
@@ -1012,7 +946,7 @@ function UnitProcedureCard({ phase, onUpdate, onDelete, t, disabled }) {
       <div style={{ display:'flex', alignItems:'center', gap:10 }}>
         <span style={{ fontSize:11, color:t.textMuted, fontFamily:"'DM Mono',monospace" }}>{totalOps} ops</span>
         {totalParams > 0 && <span style={{ fontSize:10, color:t.textMuted }}>{totalParams} params</span>}
-        {criticalOps > 0 && <MBRBadge color={t.danger} t={t}>{criticalOps} CPP</MBRBadge>}
+        {criticalOps > 0 && <Badge color={t.danger} t={t}>{criticalOps} CPP</Badge>}
         {!disabled && <button onClick={e => { e.stopPropagation(); onDelete(phase.id); }} style={{ background:'none', border:'none', cursor:'pointer', color:t.textMuted, padding:4 }}><Trash2 size={14}/></button>}
         {collapsed ? <ChevronRight size={16} color={t.textMuted}/> : <ChevronDown size={16} color={t.textMuted}/>}
       </div>
@@ -1042,7 +976,7 @@ function UnitProcedureCard({ phase, onUpdate, onDelete, t, disabled }) {
         <Plus size={13}/>Add Operation (ISA-88)
       </button>}
     </div>}
-  </MBRCard>;
+  </Card>;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1120,15 +1054,15 @@ function ESignModal({ open, onClose, onSign, mbrId, mbrCode, signatures, t }) {
           })}
         </div>
 
-        <MBRInput label="Re-enter Password" t={t} type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Confirm identity..." required />
+        <Input label="Re-enter Password" t={t} type="password" value={pw} onChange={v => setPw(v)} placeholder="Confirm identity..." required />
         {error && <div style={{ background:t.danger+'10', border:'1px solid '+t.danger+'30', borderRadius:8, padding:'8px 12px', display:'flex', alignItems:'center', gap:6, marginTop:8 }}><AlertTriangle size={12} color={t.danger}/><span style={{ color:t.danger, fontSize:12 }}>{error}</span></div>}
       </div>
       {/* Footer */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 22px', borderTop:'1px solid '+t.cardBorder }}>
         <span style={{ fontSize:10, color:t.textMuted, fontFamily:"'DM Mono',monospace" }}>SHA-256 bound to content</span>
         <div style={{ display:'flex', gap:8 }}>
-          <MBRBtn t={t} variant="ghost" onClick={onClose}>Cancel</MBRBtn>
-          <MBRBtn t={t} onClick={handleSign} disabled={signing||!role||!pw}>{signing ? <Loader2 size={13} style={{animation:'spin 1s linear infinite'}}/> : <Shield size={13}/>}{signing ? 'Verifying...' : 'Apply Signature'}</MBRBtn>
+          <Btn t={t} variant="ghost" onClick={onClose}>Cancel</Btn>
+          <Btn t={t} onClick={handleSign} disabled={signing||!role||!pw}>{signing ? <Loader2 size={13} style={{animation:'spin 1s linear infinite'}}/> : <Shield size={13}/>}{signing ? 'Verifying...' : 'Apply Signature'}</Btn>
         </div>
       </div>
     </div>
@@ -1177,6 +1111,21 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
     }
   }, [initialData]);
 
+  // Reload MBR data from API (called after Co-Designer applies proposals)
+  const reloadMBR = async () => {
+    const id = mbrId || mbr.id;
+    if (!id) return;
+    try {
+      const fresh = await mbrService.getMBR(id);
+      if (fresh) {
+        setMbr(prev => ({ ...prev, ...fresh }));
+        if (fresh.phases) setPhases(fresh.phases);
+        if (fresh.bom_items || fresh.bom) setBom(fresh.bom_items || fresh.bom || []);
+        if (fresh.signatures) setSignatures(fresh.signatures);
+      }
+    } catch (e) { console.error('[MBRDesigner] Reload failed:', e); }
+  };
+
   const disabled = !['Draft','In Review'].includes(mbr.status);
 
   const addPhase = () => {
@@ -1206,6 +1155,16 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
       } catch {}
     }
   };
+
+  // Status transitions (including Ineffective) are handled by ApprovalWorkflowBar
+  const handleStatusChange = (newStatus) => {
+    setMbr(p => ({ ...p, status: newStatus }));
+  };
+
+  // Get user from localStorage for role-gated workflow actions
+  const storedUser = (() => {
+    try { return JSON.parse(localStorage.getItem('pharma_mbr_user') || '{}'); } catch { return {}; }
+  })();
 
   const handleSave = async () => {
     setSaveStatus('saving');
@@ -1310,7 +1269,7 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
 
   return <div style={{ animation:'fadeIn 0.3s ease' }}>
     {/* ISA-88 Header */}
-    <MBRCard t={t} style={{ marginBottom:16, padding:'16px 20px' }}>
+    <Card t={t} style={{ marginBottom:16, padding:'16px 20px' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <div style={{ background:'linear-gradient(135deg,'+t.accent+','+t.info+')', borderRadius:10, padding:8, display:'flex' }}><FileText size={18} color="#fff"/></div>
@@ -1318,7 +1277,7 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               <span style={{ fontSize:16, fontWeight:800, color:t.text }}>MBR Designer</span>
               <span style={{ fontSize:12, fontWeight:700, color:t.accent, fontFamily:"'DM Mono',monospace" }}>{mbr.mbr_code}</span>
-              <MBRStatusBadge status={mbr.status} t={t}/>
+              <StatusBadge status={mbr.status} t={t}/>
               <span style={{ fontSize:10, color:t.textMuted, fontFamily:"'DM Mono',monospace" }}>v{mbr.current_version}</span>
             </div>
             <div style={{ fontSize:11, color:t.textMuted }}>ISA-88 Recipe Hierarchy · Procedure → Unit Procedure → Operation</div>
@@ -1328,41 +1287,46 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
           {/* Stats */}
           <span style={{ fontSize:10, fontFamily:"'DM Mono',monospace", color:t.textDim, padding:'3px 8px', background:t.bgAlt, borderRadius:5 }}>{phases.length} phases</span>
           <span style={{ fontSize:10, fontFamily:"'DM Mono',monospace", color:t.textDim, padding:'3px 8px', background:t.bgAlt, borderRadius:5 }}>{totalSteps} ops</span>
-          {criticalSteps > 0 && <MBRBadge color={t.danger} t={t}><AlertTriangle size={10}/>{criticalSteps} CPP</MBRBadge>}
-          <MBRBtn t={t} variant="ghost" size="sm" onClick={handleExportPDF}><FileText size={13}/>Export PDF</MBRBtn>
-          <MBRBtn t={t} size="sm" onClick={handleSave} disabled={disabled||saveStatus==='saving'}>
+          {criticalSteps > 0 && <Badge color={t.danger} t={t}><AlertTriangle size={10}/>{criticalSteps} CPP</Badge>}
+          <Btn t={t} variant="ghost" size="sm" onClick={handleExportPDF}><FileText size={13}/>Export PDF</Btn>
+          <Btn t={t} size="sm" onClick={handleSave} disabled={disabled||saveStatus==='saving'}>
             {saveStatus==='saving' ? <Loader2 size={13} style={{animation:'spin 1s linear infinite'}}/> : saveStatus==='saved' ? <CheckCircle size={13}/> : <Save size={13}/>}
             {saveStatus==='saving' ? 'Saving...' : saveStatus==='saved' ? 'Saved' : 'Save'}
-          </MBRBtn>
+          </Btn>
         </div>
       </div>
 
       {/* Lock banner */}
-      {disabled && <div style={{ background:t.warning+'10', border:'1px solid '+t.warning+'30', borderRadius:8, padding:'8px 14px', display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
-        <Lock size={13} color={t.warning}/><span style={{ color:t.warning, fontSize:12, fontWeight:600 }}>Record locked — status: {mbr.status}</span>
+      {disabled && <div style={{ background:(mbr.status==='Ineffective'?'#b4530910':t.warning+'10'), border:'1px solid '+(mbr.status==='Ineffective'?'#b4530930':t.warning+'30'), borderRadius:8, padding:'8px 14px', display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+        {mbr.status === 'Ineffective'
+          ? <><ShieldOff size={13} color="#b45309"/><span style={{ color:'#b45309', fontSize:12, fontWeight:600 }}>MBR is Ineffective — withdrawn from manufacturing use. Create a new version to reactivate.</span></>
+          : <><Lock size={13} color={t.warning}/><span style={{ color:t.warning, fontSize:12, fontWeight:600 }}>Record locked — status: {mbr.status}</span></>
+        }
       </div>}
 
       {/* Batch Record Details */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:12 }}>
-        <MBRInput label="Product Name" t={t} value={mbr.product_name} onChange={e => setMbr(p => ({...p, product_name:e.target.value}))} required disabled={disabled} placeholder="e.g. Amoxicillin 500mg" />
-        <MBRInput label="Product Code" t={t} value={mbr.product_code} onChange={e => setMbr(p => ({...p, product_code:e.target.value}))} disabled={disabled} placeholder="PROD-001" />
-        <MBRSelect label="Dosage Form" t={t} value={mbr.dosage_form} onChange={e => setMbr(p => ({...p, dosage_form:e.target.value}))} options={DOSAGE_FORMS} disabled={disabled} />
-        <MBRInput label="Batch Size" t={t} value={mbr.batch_size} onChange={e => setMbr(p => ({...p, batch_size:e.target.value}))} type="number" unit={mbr.batch_size_unit} disabled={disabled} placeholder="500" />
+        <Input label="Product Name" t={t} value={mbr.product_name} onChange={v => setMbr(p => ({...p, product_name:v}))} required disabled={disabled} placeholder="e.g. Amoxicillin 500mg" />
+        <Input label="Product Code" t={t} value={mbr.product_code} onChange={v => setMbr(p => ({...p, product_code:v}))} disabled={disabled} placeholder="PROD-001" />
+        <Select label="Dosage Form" t={t} value={mbr.dosage_form} onChange={v => setMbr(p => ({...p, dosage_form:v}))} options={DOSAGE_FORMS} disabled={disabled} />
+        <Input label="Batch Size" t={t} value={mbr.batch_size} onChange={v => setMbr(p => ({...p, batch_size:v}))} type="number" unit={mbr.batch_size_unit} disabled={disabled} placeholder="500" />
       </div>
       <div style={{ marginTop:4 }}>
         <label style={{ color:t.textDim, fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, marginBottom:4, display:'block' }}>Description</label>
         <textarea value={mbr.description} onChange={e => setMbr(p => ({...p, description:e.target.value}))} disabled={disabled} rows={2} placeholder="Manufacturing procedure description..."
           style={{ width:'100%', boxSizing:'border-box', background:t.inputBg, border:'1px solid '+t.inputBorder, color:t.text, borderRadius:8, padding:'9px 12px', fontSize:13, outline:'none', resize:'none', fontFamily:'inherit' }} />
       </div>
-    </MBRCard>
+    </Card>
 
-    {/* Approval Workflow Bar (real API) */}
+    {/* Approval Workflow Bar (real API + Ineffective workflow) */}
     <ApprovalWorkflowBar
       mbrId={mbrId || mbr.id}
       status={mbr.status}
       signatures={signatures}
       nextSignature={nextSig}
       onSignRequest={(role) => setShowSign(true)}
+      onStatusChange={handleStatusChange}
+      user={storedUser}
       t={t}
     />
 
@@ -1377,6 +1341,16 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
         setSignatures([]);
         setNextSig('Author');
       }}
+    />
+
+    {/* Co-Designer AI Chat — context-aware MBR assistant */}
+    <CoDesignerPanel
+      mbrId={mbrId || mbr.id}
+      t={t}
+      disabled={disabled}
+      cdService={cdService}
+      featuresService={featuresService}
+      onMbrUpdate={reloadMBR}
     />
 
     {/* View Toggle Tabs */}
@@ -1408,14 +1382,14 @@ export default function MBRDesigner({ theme, toast, mbrId, initialData, onDataCh
 
     {/* Unit Procedures (Phases) */}
     <SectionTitle icon={Layers} title="ISA-88 Unit Procedures" count={phases.length} t={t}
-      right={!disabled && <MBRBtn t={t} variant="accent" size="sm" onClick={addPhase}><Plus size={13}/>Add Unit Procedure</MBRBtn>} />
+      right={!disabled && <Btn t={t} variant="accent" size="sm" onClick={addPhase}><Plus size={13}/>Add Unit Procedure</Btn>} />
 
     {phases.length === 0 ? (
       <div style={{ border:'1px dashed '+t.cardBorder, borderRadius:12, padding:'48px 0', display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
         <Layers size={28} color={t.textMuted}/>
         <p style={{ color:t.textMuted, fontSize:13 }}>No unit procedures defined yet.</p>
         <p style={{ color:t.textMuted, fontSize:11 }}>ISA-88: Procedure → Unit Procedure → Operation → Phase</p>
-        {!disabled && <MBRBtn t={t} variant="accent" onClick={addPhase} style={{marginTop:8}}><Plus size={13}/>Create First Unit Procedure</MBRBtn>}
+        {!disabled && <Btn t={t} variant="accent" onClick={addPhase} style={{marginTop:8}}><Plus size={13}/>Create First Unit Procedure</Btn>}
       </div>
     ) : phases.map(phase => (
       <UnitProcedureCard key={phase.id} phase={phase} t={t} disabled={disabled} onUpdate={updatePhase} onDelete={deletePhase}/>
