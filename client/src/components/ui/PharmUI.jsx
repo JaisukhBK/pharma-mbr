@@ -61,12 +61,12 @@ export function StatusBadge({ status, t }) {
 // CARD — theme-aware container with border and rounded corners
 // ════════════════════════════════════════════════════════════════════════════
 
-export function Card({ children, t, style }) {
+export function Card({ children, t, style, ...rest }) {
   return (
     <div style={{
       background: t.card, border: '1px solid ' + t.cardBorder,
       borderRadius: 12, padding: 18, ...style,
-    }}>
+    }} {...rest}>
       {children}
     </div>
   );

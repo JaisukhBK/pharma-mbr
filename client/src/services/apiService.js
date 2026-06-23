@@ -5,6 +5,8 @@
 const API = import.meta.env.VITE_API_URL || '';
 const MBR = `${API}/api/mbr`;
 const CD  = `${API}/api/co-designer`;
+const EQUIP = `${API}/api/equipment`;
+const GEN = `${API}/api/genealogy`;
 
 // ════════════════════════════════════════════════════════════════════════
 // SHARED FETCH HELPER — single point of auth token management
@@ -306,5 +308,36 @@ export const featuresService = {
   },
 };
 
+// ═══ EQUIPMENT SERVICE — Equipment Registry, Calibration, Qualification ═══
+export const equipmentService = {
+  list: (params = {}) => { const clean = Object.fromEntries(Object.entries(params).filter(([,v]) => v !== undefined && v !== null && v !== '')); const q = new URLSearchParams(clean); return f(`${EQUIP}?${q}`); },
+  get: (id) => f(`${EQUIP}/${id}`),
+  create: (data) => f(EQUIP, { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => f(`${EQUIP}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getStats: () => f(`${EQUIP}/stats/overview`),
+  getOverdueCalibrations: () => f(`${EQUIP}/calibrations/overdue`),
+  recordCalibration: (id, data) => f(`${EQUIP}/${id}/calibration`, { method: 'POST', body: JSON.stringify(data) }),
+  getCalibrationHistory: (id) => f(`${EQUIP}/${id}/calibrations`),
+  updateQualification: (id, status, notes) => f(`${EQUIP}/${id}/qualification`, { method: 'PUT', body: JSON.stringify({ qualification_status: status, notes }) }),
+};
+
+// ═══ GENEALOGY SERVICE — Material Master, Lots, Transactions, Trace ═══
+export const genealogyService = {
+  getStats: () => f(`${GEN}/stats`),
+  listMaterials: (params = {}) => { const clean = Object.fromEntries(Object.entries(params).filter(([,v]) => v !== undefined && v !== null && v !== '')); return f(`${GEN}/materials?${new URLSearchParams(clean)}`); },
+  getMaterial: (id) => f(`${GEN}/materials/${id}`),
+  createMaterial: (data) => f(`${GEN}/materials`, { method: 'POST', body: JSON.stringify(data) }),
+  updateMaterial: (id, data) => f(`${GEN}/materials/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  createLot: (materialId, data) => f(`${GEN}/materials/${materialId}/lots`, { method: 'POST', body: JSON.stringify(data) }),
+  updateLotStatus: (lotId, status, notes) => f(`${GEN}/lots/${lotId}/status`, { method: 'PUT', body: JSON.stringify({ status, notes }) }),
+  getLotTransactions: (lotId) => f(`${GEN}/lots/${lotId}/transactions`),
+  recordTransaction: (data) => f(`${GEN}/transactions`, { method: 'POST', body: JSON.stringify(data) }),
+  forwardTrace: (lotId) => f(`${GEN}/trace/forward/${lotId}`),
+  backwardTrace: (batchNumber) => f(`${GEN}/trace/backward/${encodeURIComponent(batchNumber)}`),
+  lookupLot: (lotNumber) => f(`${GEN}/lots/lookup/${encodeURIComponent(lotNumber)}`),
+  getExpiringLots: (days) => f(`${GEN}/lots/expiring?days=${days || 90}`),
+  listBatches: () => f(`${GEN}/batches`),
+};
+
 // Default export for backward compatibility where default imports were used
-export default { authService, mbrService, cdService, featuresService };
+export default { authService, mbrService, cdService, featuresService, equipmentService, genealogyService };

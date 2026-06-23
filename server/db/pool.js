@@ -489,23 +489,51 @@ const MIGRATIONS = [
   {
     name: 'M-004 EBR and genealogy schema',
     sql: `
+      -- Material master (genealogy)
+      CREATE TABLE IF NOT EXISTS material_master (
+        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        material_code       VARCHAR(50) UNIQUE NOT NULL,
+        material_name       VARCHAR(255) NOT NULL,
+        material_type       VARCHAR(30) DEFAULT 'Raw Material',
+        cas_number          VARCHAR(30),
+        grade               VARCHAR(50),
+        supplier            VARCHAR(255),
+        supplier_code       VARCHAR(50),
+        unit                VARCHAR(20) DEFAULT 'kg',
+        retest_interval_days INT,
+        shelf_life_months   INT,
+        storage_conditions  VARCHAR(100),
+        min_stock           NUMERIC(12,4),
+        is_controlled       BOOLEAN DEFAULT false,
+        is_active           BOOLEAN DEFAULT true,
+        created_by          UUID REFERENCES users(id),
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ DEFAULT NOW()
+      );
+
       -- Material lots (genealogy)
       CREATE TABLE IF NOT EXISTS material_lots (
-        id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        lot_number   VARCHAR(100) NOT NULL UNIQUE,
-        material_code VARCHAR(100) NOT NULL,
-        material_name VARCHAR(200) NOT NULL,
-        category     VARCHAR(50)  DEFAULT 'Raw Material',
-        supplier     VARCHAR(200),
-        quantity     DECIMAL(12,4) NOT NULL,
-        unit         VARCHAR(30)  NOT NULL,
-        status       VARCHAR(30)  NOT NULL DEFAULT 'Quarantine',
-        received_date DATE,
-        expiry_date  DATE,
-        coa_number   VARCHAR(100),
-        created_by   UUID NOT NULL REFERENCES users(id),
-        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        material_id         UUID REFERENCES material_master(id) ON DELETE CASCADE,
+        lot_number          VARCHAR(50) NOT NULL,
+        supplier_lot        VARCHAR(50),
+        quantity_received   NUMERIC(12,4),
+        quantity_available  NUMERIC(12,4),
+        unit                VARCHAR(20) DEFAULT 'kg',
+        received_date       DATE,
+        manufacture_date    DATE,
+        expiry_date         DATE,
+        retest_date         DATE,
+        coa_reference       VARCHAR(100),
+        coa_status          VARCHAR(20) DEFAULT 'Pending',
+        status              VARCHAR(20) DEFAULT 'Quarantine',
+        warehouse_location  VARCHAR(100),
+        received_by         UUID REFERENCES users(id),
+        released_by         UUID REFERENCES users(id),
+        released_at         TIMESTAMPTZ,
+        notes               TEXT,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ DEFAULT NOW()
       );
 
       -- Electronic Batch Records
@@ -523,7 +551,7 @@ const MIGRATIONS = [
         operator_id     UUID REFERENCES users(id),
         started_at      TIMESTAMPTZ,
         completed_at    TIMESTAMPTZ,
-        phases_data     JSONB,                                 -- full phase/step/param tree
+        phases_data     JSONB,
         material_consumption JSONB DEFAULT '[]',
         outputs         JSONB DEFAULT '[]',
         created_by      UUID NOT NULL REFERENCES users(id),
@@ -550,19 +578,34 @@ const MIGRATIONS = [
         recorded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      -- Batch genealogy links (material lot → EBR)
+      -- Material transactions
+      CREATE TABLE IF NOT EXISTS material_transactions (
+        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        lot_id              UUID REFERENCES material_lots(id),
+        material_id         UUID REFERENCES material_master(id),
+        transaction_type    VARCHAR(20) NOT NULL,
+        quantity            NUMERIC(12,4) NOT NULL,
+        unit                VARCHAR(20) DEFAULT 'kg',
+        batch_number        VARCHAR(50),
+        ebr_id              UUID,
+        mbr_step_id         UUID,
+        performed_by        UUID REFERENCES users(id),
+        reason              TEXT,
+        created_at          TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      -- Batch genealogy links (material lot → batch)
       CREATE TABLE IF NOT EXISTS batch_genealogy (
-        id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        ebr_id         UUID NOT NULL REFERENCES ebrs(id) ON DELETE CASCADE,
-        material_lot_id UUID REFERENCES material_lots(id),
-        lot_number     VARCHAR(100) NOT NULL,
-        material_name  VARCHAR(200),
-        qty_required   DECIMAL(12,4),
-        qty_dispensed  DECIMAL(12,4),
-        unit           VARCHAR(30),
-        step_name      VARCHAR(200),
-        dispensed_by   UUID REFERENCES users(id),
-        dispensed_at   TIMESTAMPTZ
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        ebr_id         UUID,
+        batch_number   VARCHAR(50) NOT NULL,
+        product_name   VARCHAR(255),
+        material_id    UUID REFERENCES material_master(id),
+        lot_id         UUID REFERENCES material_lots(id),
+        quantity_used  NUMERIC(12,4),
+        unit           VARCHAR(20),
+        step_name      VARCHAR(255),
+        consumed_at    TIMESTAMPTZ DEFAULT NOW()
       );
 
       -- Recall management
@@ -592,8 +635,12 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_ebr_status    ON ebrs(status);
       CREATE INDEX IF NOT EXISTS idx_ebr_mbr       ON ebrs(mbr_id);
       CREATE INDEX IF NOT EXISTS idx_ebr_batch_num ON ebrs(batch_number);
-      CREATE INDEX IF NOT EXISTS idx_genealogy_lot ON batch_genealogy(lot_number);
-      CREATE INDEX IF NOT EXISTS idx_genealogy_ebr ON batch_genealogy(ebr_id);
+      CREATE INDEX IF NOT EXISTS idx_matmaster_code ON material_master(material_code);
+      CREATE INDEX IF NOT EXISTS idx_matlot_material ON material_lots(material_id);
+      CREATE INDEX IF NOT EXISTS idx_matlot_status ON material_lots(status);
+      CREATE INDEX IF NOT EXISTS idx_mattxn_lot ON material_transactions(lot_id);
+      CREATE INDEX IF NOT EXISTS idx_genealogy_batch ON batch_genealogy(batch_number);
+      CREATE INDEX IF NOT EXISTS idx_genealogy_lot ON batch_genealogy(lot_id);
     `,
   },
 

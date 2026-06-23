@@ -18,6 +18,8 @@ import CoDesignerPanel from './components/MBRDesigner/CoDesignerPanel';
 import MBRFeaturesToolbar from './components/MBRDesigner/MBRFeaturesToolbar';
 import OperationFormulaPanel from './components/MBRDesigner/OperationFormulaPanel';
 import EBRExecution from './components/EBRExecution';
+import EquipmentRegistry from './components/Equipment/EquipmentRegistry';
+import GenealogyTraceability from './components/Genealogy/GenealogyTraceability';
 
 const API = import.meta.env.VITE_API_URL || '';
 
@@ -682,19 +684,7 @@ function LiveDataView({ t, title, icon: Icon, description, endpoint, renderRows,
 // ════════════════════════════════════════════════════════════════
 
 function EquipmentView({ t }) {
-  return <LiveDataView t={t} title="Equipment Registry" icon={Box}
-    description="All equipment master records, calibration status and qualification lifecycle"
-    endpoint="/api/equipment"
-    columns={[{key:'code',label:'Code',width:'130px'},{key:'name',label:'Equipment Name',width:'2fr'},{key:'type',label:'Type',width:'130px'},{key:'status',label:'Status',width:'110px'},{key:'qual',label:'Qualification',width:'160px'},{key:'cal',label:'Cal Due',width:'110px'}]}
-    renderRows={(eq,t) => [
-      <span key="c" style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:t.accent}}>{eq.equipment_code}</span>,
-      <div key="n"><div style={{fontSize:12,fontWeight:600,color:t.text}}>{eq.equipment_name}</div><div style={{fontSize:10,color:t.textMuted}}>{eq.manufacturer} {eq.model}</div></div>,
-      <span key="t" style={{fontSize:11,color:t.textDim}}>{eq.equipment_type}</span>,
-      <span key="s" style={{fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:5,background:eq.status==='Available'?t.success+'15':eq.status==='Out of Service'?t.danger+'15':t.warning+'15',color:eq.status==='Available'?t.success:eq.status==='Out of Service'?t.danger:t.warning}}>{eq.status}</span>,
-      <span key="q" style={{fontSize:11,color:t.textDim}}>{eq.qualification_status}</span>,
-      <span key="d" style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:eq.calibration_due&&new Date(eq.calibration_due)<new Date()?t.danger:t.textMuted}}>{eq.calibration_due?new Date(eq.calibration_due).toLocaleDateString():'—'}</span>,
-    ]}
-  />;
+  return <div style={{padding:'24px 32px'}}><EquipmentRegistry theme={t} /></div>;
 }
 
 function DeviationsView({ t }) {
@@ -790,18 +780,7 @@ function EBRView({ t, title, icon: Icon, description }) {
 }
 
 function GenealogyView({ t }) {
-  return <LiveDataView t={t} title="Genealogy & Traceability" icon={GitBranch}
-    description="Forward/backward material traceability and recall simulation"
-    endpoint="/api/genealogy/batches"
-    columns={[{key:'c',label:'Batch Code',width:'160px'},{key:'p',label:'Product',width:'2fr'},{key:'m',label:'Materials',width:'100px'},{key:'d',label:'Deviations',width:'110px'},{key:'r',label:'Release',width:'110px'}]}
-    renderRows={(b,t) => [
-      <span key="c" style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:t.accent}}>{b.code||b.batch_number}</span>,
-      <span key="p" style={{fontSize:12,fontWeight:600,color:t.text}}>{b.product_name}</span>,
-      <span key="m" style={{fontSize:11,color:t.textDim}}>{b.material_count||0}</span>,
-      <span key="d" style={{fontSize:11,color:b.deviation_count>0?t.warning:t.success}}>{b.deviation_count||0}</span>,
-      <span key="r" style={{fontSize:11,padding:'2px 8px',borderRadius:5,background:b.release_status==='Released'?t.success+'15':t.bgAlt,color:b.release_status==='Released'?t.success:t.textMuted}}>{b.release_status||'Pending'}</span>,
-    ]}
-  />;
+  return <div style={{padding:'24px 32px'}}><GenealogyTraceability theme={t} /></div>;
 }
 
 function EquipmentQMView({ t }) {
