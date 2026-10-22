@@ -30,6 +30,9 @@ var complianceRoutes           = require('./routes/complianceRoutes');
 var coDesignerRoutes           = require('./routes/coDesignerRoutes');
 var kpiRoutes                  = require('./routes/kpiRoutes');
 var integrationPlatformRoutes  = require('./routes/integrationPlatformRoutes');
+var dispensingRoutes           = require('./routes/dispensingRoutes');
+var envMonitoringRoutes        = require('./routes/envMonitoringRoutes');
+var bmsPollingEngine           = require('./services/bmsPollingEngine');
 
 var app  = express();
 var PORT = process.env.PORT || 5000;
@@ -186,6 +189,8 @@ app.use('/api/compliance',          complianceRoutes);
 app.use('/api/co-designer',         coDesignerRoutes);
 app.use('/api/integration-platform', integrationPlatformRoutes);
 app.use('/api',                     kpiRoutes);
+app.use('/api/dispensing', dispensingRoutes);
+app.use('/api/env',        envMonitoringRoutes);
 
 // ═══ AUDIT TRAIL ENDPOINTS ════════════════════════════════════════════════════
 
@@ -324,6 +329,15 @@ async function startServer() {
       resourceType: 'SYSTEM',
       details:      'PharmaMES.AI server started — Segment 6 security hardening active',
     });
+
+    // Start BMS polling engine (background) — only in non-serverless environments
+    if (!process.env.VERCEL) {
+      bmsPollingEngine.startPolling().catch(function(err) {
+        console.warn('  -> BMS Polling: Failed to start —', err.message);
+      });
+    } else {
+      console.log('  -> BMS Polling: Serverless mode — use /api/env/poll/trigger via Vercel Cron');
+    }
 
   } catch (err) {
     console.error('\n  [FATAL] Server startup failed:', err.message);

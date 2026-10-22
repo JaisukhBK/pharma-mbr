@@ -8,7 +8,7 @@ import {
   Search, ArrowLeft, ArrowRight, BarChart2, GitBranch, BookOpen,
   AlertOctagon, RefreshCw, Settings, ClipboardList, Wrench,
   Zap, Box, Radio, ChevronDown, ChevronUp, TrendingUp, Package,
-  Users, Terminal, Menu, Send, MessageSquare, Activity,
+  Users, Terminal, Menu, Send, MessageSquare, Activity, Scale, Thermometer,
   ChevronLeft, RotateCw, Upload, Download, Copy, Trash2
 } from 'lucide-react';
 
@@ -20,6 +20,8 @@ import OperationFormulaPanel from './components/MBRDesigner/OperationFormulaPane
 import EBRExecution from './components/EBRExecution';
 import EquipmentRegistry from './components/Equipment/EquipmentRegistry';
 import GenealogyTraceability from './components/Genealogy/GenealogyTraceability';
+import DispensingModule from './components/Dispensing/DispensingModule';
+import EnvMonitoringDashboard from './components/EnvMonitoring/EnvMonitoringDashboard';
 
 const API = import.meta.env.VITE_API_URL || '';
 
@@ -82,6 +84,7 @@ const NAV_GROUPS = [
       { id: 'ebr',       label: 'EBR Execution',           icon: ClipboardList },
       { id: 'batches',   label: 'Batches',                 icon: Package },
       { id: 'genealogy', label: 'Genealogy & Traceability', icon: GitBranch },
+      { id: 'dispensing', label: 'Weighing & Dispensing',   icon: Scale },
     ],
   },
   {
@@ -89,6 +92,7 @@ const NAV_GROUPS = [
     items: [
       { id: 'equipment_qm', label: 'Equipment QM',       icon: Wrench },
       { id: 'equipment',    label: 'Equipment Registry', icon: Box },
+      { id: 'env_monitoring', label: 'Env Monitoring',   icon: Thermometer },
     ],
   },
   {
@@ -783,6 +787,14 @@ function GenealogyView({ t }) {
   return <div style={{padding:'24px 32px'}}><GenealogyTraceability theme={t} /></div>;
 }
 
+function DispensingView({ t }) {
+  return <div style={{padding:'24px 32px'}}><DispensingModule theme={t} /></div>;
+}
+
+function EnvMonitoringView({ t }) {
+  return <div style={{padding:'24px 32px'}}><EnvMonitoringDashboard theme={t} /></div>;
+}
+
 function EquipmentQMView({ t }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1146,8 +1158,10 @@ function SectionView({ section, t, user, onSelectMBR }) {
     case 'ebr':          return <EBRExecution t={t} user={user}/>;
     case 'batches':      return <EBRView t={t} title="Batches" icon={Package} description="All executed batches and release status"/>;
     case 'genealogy':    return <GenealogyView t={t}/>;
+    case 'dispensing':   return <DispensingView t={t}/>;
     case 'equipment_qm': return <EquipmentQMView t={t}/>;
     case 'equipment':    return <EquipmentView t={t}/>;
+    case 'env_monitoring': return <EnvMonitoringView t={t}/>;
     case 'deviations':   return <DeviationsView t={t}/>;
     case 'devcapa':      return <DevCapaView t={t}/>;
     case 'change':       return <ChangeControlView t={t}/>;

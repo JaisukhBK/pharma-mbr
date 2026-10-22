@@ -7,6 +7,8 @@ const MBR = `${API}/api/mbr`;
 const CD  = `${API}/api/co-designer`;
 const EQUIP = `${API}/api/equipment`;
 const GEN = `${API}/api/genealogy`;
+const DISP = `${API}/api/dispensing`;
+const ENV = `${API}/api/env`;
 
 // ════════════════════════════════════════════════════════════════════════
 // SHARED FETCH HELPER — single point of auth token management
@@ -339,5 +341,41 @@ export const genealogyService = {
   listBatches: () => f(`${GEN}/batches`),
 };
 
+// ═══ DISPENSING SERVICE — Weighing, tolerance checks, lot selection ═══
+export const dispensingService = {
+  getStats: () => f(`${DISP}/stats`),
+  listOrders: (params = {}) => { const clean = Object.fromEntries(Object.entries(params).filter(([,v]) => v !== undefined && v !== null && v !== '')); return f(`${DISP}/orders?${new URLSearchParams(clean)}`); },
+  getOrder: (id) => f(`${DISP}/orders/${id}`),
+  createFromBOM: (data) => f(`${DISP}/orders/from-bom`, { method: 'POST', body: JSON.stringify(data) }),
+  getAvailableLots: (orderId) => f(`${DISP}/orders/${orderId}/available-lots`),
+  recordWeighing: (orderId, data) => f(`${DISP}/orders/${orderId}/weigh`, { method: 'POST', body: JSON.stringify(data) }),
+  verifyRecord: (recordId) => f(`${DISP}/records/${recordId}/verify`, { method: 'PUT' }),
+};
+
+// ═══ ENV MONITORING SERVICE — Zones, Sensors, Readings, Alerts, BMS ═══
+export const envService = {
+  getStats: () => f(`${ENV}/stats`),
+  listZones: (params = {}) => { const clean = Object.fromEntries(Object.entries(params).filter(([,v]) => v !== undefined && v !== null && v !== '')); return f(`${ENV}/zones?${new URLSearchParams(clean)}`); },
+  getZone: (id) => f(`${ENV}/zones/${id}`),
+  createZone: (data) => f(`${ENV}/zones`, { method: 'POST', body: JSON.stringify(data) }),
+  createSensor: (zoneId, data) => f(`${ENV}/zones/${zoneId}/sensors`, { method: 'POST', body: JSON.stringify(data) }),
+  ingestReading: (data) => f(`${ENV}/readings`, { method: 'POST', body: JSON.stringify(data) }),
+  getReadingHistory: (sensorId, hours) => f(`${ENV}/sensors/${sensorId}/history?hours=${hours || 24}`),
+  getZoneSnapshot: (zoneId) => f(`${ENV}/zones/${zoneId}/snapshot`),
+  getAlerts: () => f(`${ENV}/alerts`),
+  acknowledgeAlert: (id, notes) => f(`${ENV}/alerts/${id}/acknowledge`, { method: 'PUT', body: JSON.stringify({ notes }) }),
+  resolveAlert: (id, notes) => f(`${ENV}/alerts/${id}/resolve`, { method: 'PUT', body: JSON.stringify({ notes }) }),
+  listConnections: () => f(`${ENV}/connections`),
+  createConnection: (data) => f(`${ENV}/connections`, { method: 'POST', body: JSON.stringify(data) }),
+  simulateRun: () => f(`${ENV}/simulate/run`, { method: 'POST' }),
+  captureStepSnapshot: (ebrId, stepId, data) => f(`${ENV}/ebr/${ebrId}/step/${stepId}/env-snapshot`, { method: 'POST', body: JSON.stringify(data) }),
+  getStepEnvRecords: (ebrId, stepId) => f(`${ENV}/ebr/${ebrId}/step/${stepId}/env-records`),
+  getEbrEnvSummary: (ebrId) => f(`${ENV}/ebr/${ebrId}/env-summary`),
+  getPollerStatus: () => f(`${ENV}/poll/status`),
+  startPolling: () => f(`${ENV}/poll/start`, { method: 'POST' }),
+  stopPolling: () => f(`${ENV}/poll/stop`, { method: 'POST' }),
+  restartPolling: () => f(`${ENV}/poll/restart`, { method: 'POST' }),
+};
+
 // Default export for backward compatibility where default imports were used
-export default { authService, mbrService, cdService, featuresService, equipmentService, genealogyService };
+export default { authService, mbrService, cdService, featuresService, equipmentService, genealogyService, dispensingService, envService };
